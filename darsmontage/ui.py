@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import shutil
+import tempfile
 import subprocess
 import sys
 import threading
@@ -23,7 +25,8 @@ import fitz
 
 from .__main__ import STAGES
 from .arabic import normalize
-from .book import guess_page_offset, load_turath_pages, turath_catalog, turath_volumes
+from .book import (build_book, guess_page_offset, load_turath_pages, render_view, turath_catalog,
+                   turath_volumes)
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "cache"
@@ -243,6 +246,23 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "no such page"}, 404)
                 else:
                     self._bytes(doc[idx].get_pixmap(dpi=80).tobytes("png"), "image/png")
+            elif url.path == "/api/sample":
+                # One page drawn with the chosen look, to judge it before running.
+                text = load_turath_pages(int(q["id"]), q["vol"], CACHE)
+                page, offset = int(q["page"]), int(q.get("offset", 0))
+                book = build_book(Path(q["pdf"]), text, offset, page, page, float(q.get("window", 0.55)))
+                idx = page + offset - 1
+                if idx not in book.layouts:
+                    self._json({"error": "no such page"}, 404)
+                    return
+                background = Path(q["background"]) if q.get("background") else None
+                tmp = Path(tempfile.mkdtemp(prefix="darsmontage_"))
+                try:
+                    shot = render_view(book, idx, 0, tmp, scale=float(q.get("size", 1)),
+                                       pos=q.get("pos", "center"), background=background)
+                    self._bytes(shot.read_bytes(), "image/png")
+                finally:
+                    shutil.rmtree(tmp, ignore_errors=True)
             elif url.path == "/api/result":
                 out = Path(q.get("out") or JOB.out)
                 plan = out / "work" / "plan.json"
