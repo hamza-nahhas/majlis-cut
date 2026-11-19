@@ -25,7 +25,8 @@ import fitz
 
 from .__main__ import STAGES
 from .arabic import normalize
-from .book import (build_book, guess_page_offset, load_turath_pages, render_view, turath_catalog,
+from .book import (build_book, guess_page_offset, load_turath_pages, read_pdf_text, render_view,
+                   turath_catalog,
                    turath_volumes)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,6 +54,17 @@ sys.stdout.buffer.write("\n".join(p for p in picked if p).encode("utf-8"))
 """
 
 
+def page_as_read(pdf: Path, page: int) -> str:
+    """The words read off one PDF page, line under line."""
+    from .ocr import available
+    if available():
+        raise RuntimeError(available())
+    lines: dict[int, list[str]] = {}
+    for w in read_pdf_text(pdf, CACHE, page, page).get(page, []):
+        lines.setdefault(w.line, []).append(w.text)
+    return "\n".join(" ".join(ws) for ws in lines.values())
+
+
 class Job:
     def __init__(self) -> None:
         self.proc: subprocess.Popen | None = None
@@ -72,12 +84,13 @@ class Job:
     def start(self, cfg: dict) -> None:
         cmd = [sys.executable, "-m", "darsmontage", "--json-progress",
                "--audio", cfg["audio"], "--pdf", cfg["pdf"], "--out", cfg["out"],
-               "--turath", str(cfg["book_id"]), "--vol", str(cfg["vol"]),
-               "--page-offset", str(int(cfg.get("page_offset") or 0)),
                "--window", str(float(cfg.get("window") or 0.55)),
                "--overlay-size", str(float(cfg.get("overlay_size") or 1.0)),
                "--overlay-pos", cfg.get("overlay_pos") or "center",
                "--asr", cfg.get("asr") or "whisper", "--cache", str(CACHE)]
+        if cfg.get("text_source") != "pdf":       # otherwise the text is read off the PDF
+            cmd += ["--turath", str(cfg["book_id"]), "--vol", str(cfg["vol"]),
+                    "--page-offset", str(int(cfg.get("page_offset") or 0))]
         if cfg.get("pages"):
             cmd += ["--pages", cfg["pages"]]
         if cfg.get("background"):
@@ -237,8 +250,11 @@ class Handler(BaseHTTPRequestHandler):
                 middle = fitz.open(q["pdf"]).page_count // 2 + 1 - offset     # printed page shown
                 self._json({"offset": offset, "sure": margin > 0.15, "sample": middle})
             elif url.path == "/api/pagetext":
-                text = load_turath_pages(int(q["id"]), q["vol"], CACHE)
-                self._json({"text": text.get(int(q["page"]), "")})
+                page = int(q["page"])
+                if q.get("id"):
+                    self._json({"text": load_turath_pages(int(q["id"]), q["vol"], CACHE).get(page, "")})
+                else:
+                    self._json({"text": page_as_read(Path(q["pdf"]), page)})
             elif url.path == "/api/pageimg":
                 doc = fitz.open(q["pdf"])
                 idx = int(q["page"]) + int(q.get("offset", 0)) - 1
@@ -248,8 +264,11 @@ class Handler(BaseHTTPRequestHandler):
                     self._bytes(doc[idx].get_pixmap(dpi=80).tobytes("png"), "image/png")
             elif url.path == "/api/sample":
                 # One page drawn with the chosen look, to judge it before running.
-                text = load_turath_pages(int(q["id"]), q["vol"], CACHE)
                 page, offset = int(q["page"]), int(q.get("offset", 0))
+                if q.get("id"):
+                    text = load_turath_pages(int(q["id"]), q["vol"], CACHE)
+                else:
+                    text = read_pdf_text(Path(q["pdf"]), CACHE, page, page)
                 book = build_book(Path(q["pdf"]), text, offset, page, page, float(q.get("window", 0.55)))
                 idx = page + offset - 1
                 if idx not in book.layouts:
@@ -301,7 +320,9 @@ class Handler(BaseHTTPRequestHandler):
                 if JOB.state == "running":
                     self._json({"error": "يوجد تشغيل جارٍ"}, 409)
                     return
-                missing = [k for k in ("audio", "pdf", "out", "book_id", "vol") if not body.get(k)]
+                need = ("audio", "pdf", "out") if body.get("text_source") == "pdf" \
+                    else ("audio", "pdf", "out", "book_id", "vol")
+                missing = [k for k in need if not body.get(k)]
                 for key in ("audio", "pdf"):
                     if body.get(key) and not Path(body[key]).is_file():
                         self._json({"error": f"الملف غير موجود: {body[key]}"}, 400)

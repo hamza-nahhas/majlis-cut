@@ -210,6 +210,12 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000
       <span class="act">اختيار</span></button>
   </div>
   <div class="field">
+    <span class="label">مصدر النص</span>
+    <label class="row" style="font-weight:400"><input type="radio" name="text_source" value="turath" checked> من مكتبة تراث (الأدق، إن وُجد الكتاب فيها بالطبعة نفسها)</label>
+    <label class="row" style="font-weight:400"><input type="radio" name="text_source" value="pdf"> الكتاب غير موجود في المكتبة: يُقرأ النص من ملف الـPDF نفسه</label>
+    <small id="pdfSourceHint" class="hidden">تُقرأ صفحات الملف آليًّا مرة واحدة (نحو ثلث ثانية للصفحة) ثم تُحفظ. لا حاجة إلى اختيار كتاب أو مجلد أو ترقيم.</small>
+  </div>
+  <div class="field" data-turath>
     <label for="bookQuery">نص الكتاب</label>
     <div id="bookChosen" class="hidden"><span class="chip"><span id="bookName"></span>
       <button class="ghost" id="bookChange">تغيير</button></span></div>
@@ -219,31 +225,31 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000
     </div>
     <small>من مكتبة turath.io. اختر الطبعة نفسها التي في ملف الـPDF.</small>
   </div>
-  <div class="field">
+  <div class="field" data-turath>
     <label for="vol">المجلد</label>
     <select id="vol"></select>
   </div>
   <div class="field">
-    <span class="label">ترقيم الصفحات</span>
+    <span class="label" id="checkLabel">ترقيم الصفحات</span>
     <div class="row">
-      <span>صفحة الـPDF = الصفحة المطبوعة +</span>
-      <input type="number" id="page_offset" value="0" style="width:90px">
-      <button id="detect">اكتشاف تلقائي</button>
+      <span data-turath>صفحة الـPDF = الصفحة المطبوعة +</span>
+      <input type="number" id="page_offset" value="0" style="width:90px" data-turath>
+      <button id="detect" data-turath>اكتشاف تلقائي</button>
       <button id="showCheck">معاينة</button>
     </div>
     <div class="note hidden" id="offsetNote"></div>
     <div class="check" id="check">
-      <div><div class="row" style="margin-bottom:6px"><span>الصفحة المطبوعة</span>
+      <div><div class="row" style="margin-bottom:6px"><span id="checkPageLabel">الصفحة المطبوعة</span>
         <input type="number" id="checkPage" style="width:90px"></div>
         <img id="checkImg" alt="صفحة الكتاب"></div>
-      <div><div class="hint" style="margin-bottom:6px">نص الصفحة نفسها في النسخة الرقمية. يجب أن يطابق الصورة.</div>
+      <div><div class="hint" style="margin-bottom:6px" id="checkHint"></div>
         <div class="text" id="checkText"></div></div>
     </div>
   </div>
   <div class="field">
     <label for="pages">حصر الصفحات <small style="display:inline">(اختياري)</small></label>
     <input type="text" id="pages" placeholder="مثال: 1-120" style="width:170px;direction:ltr">
-    <small>يُترك فارغًا للبحث في كل صفحات الملف.</small>
+    <small id="pagesHint"></small>
   </div>
 </section>
 
@@ -344,7 +350,7 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const form = { audio: "", pdf: "", out: "", cam_main: [], cam_backup: [], book_id: null, book_name: "",
+const form = { audio: "", pdf: "", out: "", cam_main: [], cam_backup: [], text_source: "turath", book_id: null, book_name: "",
                vol: "", page_offset: 0, pages: "", window: 0.55, asr: "whisper",
                overlay_size: 1, overlay_pos: "center", background: "" };
 let plan = null, pollTimer = null, saveTimer = null, pending = 0, currentOut = "", step = 0, hasResult = false;
@@ -373,7 +379,7 @@ function baseName(p) { return p.split(/[\\/]/).pop(); }
 /* ---------- steps ---------- */
 function missing(n) {
   if (n === 0) return !form.audio ? "اختر تسجيل الدرس." : !form.out ? "اختر مجلد الدرس." : "";
-  if (n === 1) return !form.pdf ? "اختر ملف الـPDF." : !form.book_id ? "اختر نص الكتاب." : form.vol === "" ? "اختر المجلد." : "";
+  if (n === 1) return !form.pdf ? "اختر ملف الـPDF." : fromPdf() ? "" : !form.book_id ? "اختر نص الكتاب." : form.vol === "" ? "اختر المجلد." : "";
   return "";
 }
 function reachable(n) {
@@ -432,6 +438,17 @@ function paint() {
       const li = document.createElement("li"); li.textContent = p; return li; }));
     document.querySelector(`[data-clear=${key}]`).classList.toggle("hidden", !form[key].length);
   }
+  for (const r of document.querySelectorAll("input[name=text_source]")) r.checked = r.value === form.text_source;
+  for (const el of document.querySelectorAll("[data-turath]")) el.classList.toggle("hidden", fromPdf());
+  $("pdfSourceHint").classList.toggle("hidden", !fromPdf());
+  $("checkLabel").textContent = fromPdf() ? "ما يُقرأ من الصفحة" : "ترقيم الصفحات";
+  $("checkPageLabel").textContent = fromPdf() ? "صفحة الـPDF" : "الصفحة المطبوعة";
+  $("checkHint").textContent = fromPdf()
+    ? "ما قرأته الأداة من هذه الصفحة. يكفي أن يكون أغلب الكلمات صحيحًا."
+    : "نص الصفحة نفسها في النسخة الرقمية. يجب أن يطابق الصورة.";
+  $("pagesHint").textContent = fromPdf()
+    ? "بأرقام صفحات الـPDF. يُترك فارغًا لقراءة كل صفحات الملف."
+    : "يُترك فارغًا للبحث في كل صفحات الملف.";
   $("bookChosen").classList.toggle("hidden", !form.book_id);
   $("bookSearch").classList.toggle("hidden", !!form.book_id);
   $("bookName").textContent = form.book_name;
@@ -443,6 +460,12 @@ $("window").addEventListener("input", e => { form.window = parseFloat(e.target.v
 $("overlay_size").addEventListener("input", e => { form.overlay_size = parseFloat(e.target.value); paint(); save(); refreshShot(); });
 $("overlay_pos").addEventListener("change", e => { form.overlay_pos = e.target.value; save(); refreshShot(); });
 $("clearBackground").addEventListener("click", () => { form.background = ""; paint(); save(); refreshShot(); });
+for (const r of document.querySelectorAll("input[name=text_source]")) {
+  r.addEventListener("change", () => {
+    form.text_source = r.value; $("offsetNote").classList.add("hidden"); paint(); save();
+    if (fromPdf()) $("check").classList.remove("on"); else autoOffset();
+  });
+}
 for (const r of document.querySelectorAll("input[name=asr]")) {
   r.addEventListener("change", () => { form.asr = r.value; paint(); save(); });
 }
@@ -511,11 +534,15 @@ async function loadVolumes() {
 }
 $("vol").addEventListener("change", e => { form.vol = e.target.value; save(); paintSteps(); autoOffset(); });
 
-function bookReady() { return form.pdf && form.book_id && form.vol !== ""; }
+function fromPdf() { return form.text_source === "pdf"; }
+function bookReady() { return form.pdf && (fromPdf() || (form.book_id && form.vol !== "")); }
+/* What the server needs to find the text: the library book, or nothing when the PDF itself is read. */
+function textQuery() { return fromPdf() ? "" : `&id=${form.book_id}&vol=${encodeURIComponent(form.vol)}`; }
+function offsetNow() { return fromPdf() ? 0 : (form.page_offset || 0); }
 /* The page numbering is checked by itself the first time a PDF meets a book and volume. */
 function autoOffset() {
   const key = [form.pdf, form.book_id, form.vol].join("|");
-  if (!bookReady() || key === offsetCheckedFor) return;
+  if (fromPdf() || !bookReady() || key === offsetCheckedFor) return;
   offsetCheckedFor = key;
   detect(true);
 }
@@ -535,7 +562,7 @@ async function detect(quiet) {
 }
 $("detect").addEventListener("click", () => detect(false));
 $("showCheck").addEventListener("click", () => {
-  if (!bookReady()) return note($("offsetNote"), "اختر ملف الـPDF والكتاب والمجلد أولًا.", true);
+  if (!bookReady()) return note($("offsetNote"), fromPdf() ? "اختر ملف الـPDF أولًا." : "اختر ملف الـPDF والكتاب والمجلد أولًا.", true);
   $("check").classList.toggle("on");
   if (!$("checkPage").value) $("checkPage").value = 20;
   refreshCheck();
@@ -544,10 +571,11 @@ $("checkPage").addEventListener("change", refreshCheck);
 async function refreshCheck() {
   if (!$("check").classList.contains("on") || !bookReady()) return;
   const page = parseInt($("checkPage").value || "20", 10);
-  $("checkImg").src = `/api/pageimg?pdf=${encodeURIComponent(form.pdf)}&page=${page}&offset=${form.page_offset || 0}`;
+  $("checkImg").src = `/api/pageimg?pdf=${encodeURIComponent(form.pdf)}&page=${page}&offset=${offsetNow()}`;
   try {
-    const got = await api(`/api/pagetext?id=${form.book_id}&vol=${encodeURIComponent(form.vol)}&page=${page}`);
-    $("checkText").textContent = got.text || "(لا نص لهذه الصفحة في النسخة الرقمية)";
+    if (fromPdf()) $("checkText").textContent = "جارٍ قراءة الصفحة…";
+    const got = await api(`/api/pagetext?pdf=${encodeURIComponent(form.pdf)}&page=${page}` + textQuery());
+    $("checkText").textContent = got.text || (fromPdf() ? "(لم يُقرأ شيء من هذه الصفحة)" : "(لا نص لهذه الصفحة في النسخة الرقمية)");
   } catch (err) { $("checkText").textContent = err.message; }
 }
 
@@ -564,16 +592,16 @@ function refreshShot() {
       $("shotNote").textContent = "مثال من الصفحة " + page + "."; };
     img.onerror = () => { $("shot").classList.remove("busy");
       $("shotNote").textContent = "تعذّر رسم المعاينة. تحقق من ترقيم الصفحات في خطوة الكتاب."; };
-    img.src = "/api/sample?" + new URLSearchParams({ pdf: form.pdf, id: form.book_id, vol: form.vol, page,
-      offset: form.page_offset || 0, window: form.window, size: form.overlay_size, pos: form.overlay_pos,
+    img.src = "/api/sample?" + new URLSearchParams({ pdf: form.pdf, id: fromPdf() ? "" : form.book_id, vol: form.vol, page,
+      offset: offsetNow(), window: form.window, size: form.overlay_size, pos: form.overlay_pos,
       background: form.background || "", v: Date.now() });
   }, 300);
 }
 
 /* ---------- run ---------- */
 function paintSummary() {
-  const rows = [["التسجيل", baseName(form.audio)], ["الكتاب", form.book_name + "، المجلد " + form.vol],
-    ["ملف الـPDF", baseName(form.pdf) + "، فرق الترقيم " + (form.page_offset || 0)],
+  const rows = [["التسجيل", baseName(form.audio)], ["النص", fromPdf() ? "يُقرأ من ملف الـPDF" : form.book_name + "، المجلد " + form.vol],
+    ["ملف الـPDF", baseName(form.pdf) + (fromPdf() ? "" : "، فرق الترقيم " + (form.page_offset || 0))],
     ["الكاميرات", (form.cam_main.length || form.cam_backup.length)
       ? form.cam_main.length + " أساسية، " + form.cam_backup.length + " احتياط" : "لا مقاطع"],
     ["مجلد الدرس", form.out]];

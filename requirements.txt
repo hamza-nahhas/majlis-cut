@@ -5,3 +5,11 @@ pymupdf
 pillow
 requests
 faster-whisper
+# reading the text off scanned pages with the reader built into Windows
+winrt-runtime
+winrt-Windows.Foundation
+winrt-Windows.Foundation.Collections
+winrt-Windows.Globalization
+winrt-Windows.Graphics.Imaging
+winrt-Windows.Media.Ocr
+winrt-Windows.Storage.Streams

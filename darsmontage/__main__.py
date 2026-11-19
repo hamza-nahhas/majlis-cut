@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .align import align, apply_edits, build_plan
 from .asr import audio_duration, stamp, transcribe
-from .book import build_book, guess_page_offset, load_turath_pages, render_view
+from .book import build_book, guess_page_offset, load_turath_pages, read_pdf_text, render_view
 
 VERSION = "0.3"
 VIEW_VERSION = 1     # raise when the way page pictures are drawn changes
@@ -109,7 +109,7 @@ def checks(plan: dict, args, text: dict[int, str], repaired: int) -> list[dict]:
     if share < 0.03:
         notes.append("لم يُعثر تقريبًا على قراءة تطابق الكتاب. تحقق من أن الكتاب والمجلد المختارين هما المقروءان "
                      "في هذا الدرس، ومن أن الصفحات المقروءة موجودة في ملف الـPDF.")
-    guess, margin = guess_page_offset(args.pdf, text)
+    guess, margin = guess_page_offset(args.pdf, text) if args.turath else (args.page_offset, 1.0)
     if margin > 0.15 and guess != args.page_offset:
         notes.append(f"فرق ترقيم الصفحات المُدخل ({args.page_offset}) يخالف المكتشَف من الملف ({guess}). "
                      "إن صحّ المكتشَف فالصفحات المعروضة الآن ليست الصفحات المقروءة.")
@@ -183,7 +183,8 @@ def run() -> None:
     ap.add_argument("--audio", required=True, type=Path, help="master audio recording of the lesson")
     ap.add_argument("--pdf", required=True, type=Path, help="the book PDF shown on screen")
     ap.add_argument("--out", required=True, type=Path, help="output folder for this lesson")
-    ap.add_argument("--turath", type=int, required=True, help="turath.io book id (text source)")
+    ap.add_argument("--turath", type=int,
+                    help="turath.io book id (text source). Without it the text is read off the PDF")
     ap.add_argument("--vol", default="1", help="volume of the book this PDF contains")
     ap.add_argument("--pages", help="printed pages to search, e.g. 1-120 (default: whole volume)")
     ap.add_argument("--page-offset", type=int, default=0,
@@ -233,9 +234,17 @@ def run() -> None:
         raise LessonError("لم يُستخرج أي كلام من التسجيل. تأكد من أن الملف فيه صوت مسموع.")
 
     stage(1)
-    text = load_turath_pages(args.turath, args.vol, args.cache or out.parent / "_books")
-    if not text:
-        raise LessonError(f"المجلد «{args.vol}» لا نص له في هذا الكتاب.")
+    books = args.cache or out.parent / "_books"
+    if args.turath:
+        text = load_turath_pages(args.turath, args.vol, books)
+        if not text:
+            raise LessonError(f"المجلد «{args.vol}» لا نص له في هذا الكتاب.")
+    else:
+        from .ocr import available
+        if available():
+            raise LessonError(available())
+        args.page_offset = 0          # pages are counted as they come in the PDF
+        text = read_pdf_text(args.pdf, books, first, last, progress=lambda f: stage(1, f))
     try:
         book = build_book(args.pdf, text, args.page_offset, first, last, args.window)
     except (ValueError, IndexError):

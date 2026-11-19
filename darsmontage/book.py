@@ -3,7 +3,7 @@ and its pictures (cropped page views rendered from the PDF).
 
 Text sources:
   * turath.io digitised text whose pagination matches the printed edition.
-  * (planned) OCR of the PDF itself, for books that exist only as scans.
+  * the PDF itself, read by OCR, for books that exist only as scans.
 The PDF is always the source of the pictures.
 """
 from __future__ import annotations
@@ -222,10 +222,29 @@ class Book:
         return best
 
 
-def build_book(pdf_path: Path, page_text: dict[int, str], page_offset: int = 0,
+def read_pdf_text(pdf_path: Path, cache_dir: Path, first: int | None = None,
+                  last: int | None = None, progress=None) -> dict[int, list]:
+    """Return {PDF page number: words read off the scan, each with its place on the page}.
+
+    What was read is kept in cache_dir, so each page of a book is read once."""
+    import hashlib
+
+    from .ocr import drop_running_heads, ocr_pages
+
+    info = pdf_path.stat()
+    key = hashlib.sha1(f"{pdf_path.resolve()}|{info.st_size}|{int(info.st_mtime)}".encode()).hexdigest()[:10]
+    count = fitz.open(pdf_path).page_count
+    wanted = [i for i in range(count) if (not first or i + 1 >= first) and (not last or i + 1 <= last)]
+    pages = ocr_pages(pdf_path, wanted, cache_dir / f"ocr_{key}.json", progress)
+    drop_running_heads(pages)
+    return {i + 1: ws for i, ws in pages.items()}
+
+
+def build_book(pdf_path: Path, page_text: dict[int, str] | dict[int, list], page_offset: int = 0,
                first: int | None = None, last: int | None = None,
                window: float = 0.55) -> Book:
-    """page_offset: PDF page number (1-based) minus printed page number.
+    """page_text: the text of each printed page, or the words read off each PDF page.
+    page_offset: PDF page number (1-based) minus printed page number.
     window: share of the printed page height that is visible at once."""
     doc = fitz.open(pdf_path)
     words: list[str] = []
@@ -239,11 +258,25 @@ def build_book(pdf_path: Path, page_text: dict[int, str], page_offset: int = 0,
         idx = pno + page_offset - 1
         if not 0 <= idx < doc.page_count:
             continue
-        toks = tokens(page_text[pno])
-        if not toks:
-            continue
         layout = analyze_page(doc[idx])
         if layout is None:
+            continue
+        if not isinstance(page_text[pno], str):
+            # Words read off the scan know their own height; footnotes are left out.
+            slack = 0.5 * layout.line_h
+            got = [(t, w.y) for w in page_text[pno]
+                   if layout.body_top - slack <= w.y <= layout.body_bottom + slack
+                   for t in tokens(w.text)]
+            if not got:
+                continue
+            layouts[idx] = layout
+            printed[idx] = pno
+            words.extend(t for t, _ in got)
+            wp.extend([idx] * len(got))
+            wy.extend(y for _, y in got)
+            continue
+        toks = tokens(page_text[pno])
+        if not toks:
             continue
         layouts[idx] = layout
         printed[idx] = pno
