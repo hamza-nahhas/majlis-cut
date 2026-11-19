@@ -13,11 +13,11 @@ import shutil
 import sys
 from pathlib import Path
 
-from .align import align, build_plan
+from .align import align, apply_edits, build_plan
 from .asr import audio_duration, stamp, transcribe
 from .book import build_book, guess_page_offset, load_turath_pages, render_view
 
-VERSION = "0.2"
+VERSION = "0.3"
 VIEW_VERSION = 1     # raise when the way page pictures are drawn changes
 from .export import Timeline, camera_placeholder, render_preview
 from .sync import camera_track, place_all, probe_video, save
@@ -66,6 +66,21 @@ def resolve_friendly(video: Path, out: Path) -> Path:
     return target
 
 
+def tidy_old_layout(out: Path, res: Path, work: Path) -> None:
+    """Move what an earlier version left at the top of the lesson folder into the new layout."""
+    for f in out.glob("asr_*"):
+        f.replace(work / f.name)
+    for name in ("lesson_video.mov", "lesson_audio.wav"):
+        for f in (out / name, out / (name + ".source.json")):
+            if f.exists():
+                f.replace(res / f.name)
+    for name in ("timeline.xml", "plan.json", "report.txt", "preview.mp4", "sync.json",
+                 "camera_placeholder.png"):
+        (out / name).unlink(missing_ok=True)
+    if (out / "views").is_dir():
+        shutil.rmtree(out / "views")
+
+
 def made_from(target: Path, source: Path) -> bool:
     """True when `target` exists and was produced from this very `source` file."""
     note = target.with_name(target.name + ".source.json")
@@ -80,9 +95,15 @@ def mark_made_from(target: Path, source: Path) -> None:
         json.dumps(stamp(source), ensure_ascii=False), encoding="utf-8")
 
 
-def checks(plan: dict, args, text: dict[int, str], repaired: int) -> list[str]:
-    """Things about this result a person should look at, in plain words."""
-    notes: list[str] = []
+def checks(plan: dict, args, text: dict[int, str], repaired: int) -> list[dict]:
+    """Things about this result a person should look at, in plain words.
+    Each note may carry the time in the lesson it is about."""
+    found: list[dict] = []
+
+    class notes:                      # noqa: N801 - keeps the calls below short
+        @staticmethod
+        def append(text: str, t: float | None = None) -> None:
+            found.append({"text": text, "t": t})
     read = [s for s in plan["segments"] if s["kind"] == "read"]
     share = sum(s["t1"] - s["t0"] for s in read) / max(1.0, plan["duration"])
     if share < 0.03:
@@ -98,23 +119,24 @@ def checks(plan: dict, args, text: dict[int, str], repaired: int) -> list[str]:
     by_text = [s for s in read if s["by"] == "text"]
     for a, b in zip(by_text, by_text[1:]):
         if b["pages"][0] < a["pages"][-1] - 2:
-            notes.append(f"عند {mmss(b['t0'])} رجعت القراءة من صفحة {a['pages'][-1]} إلى صفحة {b['pages'][0]}. راجع هذا الموضع.")
+            notes.append(f"عند {mmss(b['t0'])} رجعت القراءة من صفحة {a['pages'][-1]} إلى صفحة {b['pages'][0]}. راجع هذا الموضع.", b["t0"])
         elif b["pages"][0] > a["pages"][-1] + 10:
-            notes.append(f"عند {mmss(b['t0'])} قفزت القراءة من صفحة {a['pages'][-1]} إلى صفحة {b['pages'][0]}. راجع هذا الموضع.")
+            notes.append(f"عند {mmss(b['t0'])} قفزت القراءة من صفحة {a['pages'][-1]} إلى صفحة {b['pages'][0]}. راجع هذا الموضع.", b["t0"])
     accuracy = plan.get("voice_accuracy")
     if read and accuracy is None:
-        notes.append("لم يتيسّر تعلّم صوتَي القارئ والمعلّق من هذا الدرس، فاعتُمد على مطابقة النص وحدها.")
+        notes.append("لم تُقَس دقة تمييز صوتَي القارئ والمعلّق في هذا الدرس (مقاطعه قليلة أو قصيرة). "
+                     "راجع حدود المقاطع بعناية أكبر.")
     elif accuracy is not None and accuracy < 0.8:
         notes.append(f"تمييز صوت القارئ من المعلّق ضعيف في هذا الدرس ({accuracy:.0%}). راجع حدود المقاطع بعناية أكبر.")
-    voiced = sum(1 for s in read if s["by"] == "voice")
-    if voiced:
-        notes.append(f"{voiced} مقطع حُسب قراءةً بالصوت وحده دون مطابقة نص. هي معلَّمة في القائمة.")
+    for s in read:
+        if s["by"] == "voice":
+            notes.append(f"المقطع عند {mmss(s['t0'])} حُسب قراءةً بالصوت وحده دون مطابقة نص. تأكد منه.", s["t0"])
     lost = [c["name"] for c in plan.get("cameras", []) if not c["ok"]]
     if lost:
         notes.append("مقاطع كاميرا لم تُزامَن وتحتاج وضعًا يدويًّا: " + "، ".join(lost))
     if repaired:
         notes.append(f"أُعيد تفريغ {repaired} موضع أسقطه التفريغ الأول.")
-    return notes
+    return found
 
 
 def explain(exc: Exception) -> str:
@@ -194,13 +216,16 @@ def run() -> None:
             print(json.dumps({"stage": n, "p": p}), flush=True)
 
     out: Path = args.out
-    out.mkdir(parents=True, exist_ok=True)
+    res, rev, work = out / "resolve", out / "review", out / "work"
+    for d in (res, rev, work):
+        d.mkdir(parents=True, exist_ok=True)
+    tidy_old_layout(out, res, work)
     first = last = None
     if args.pages:
         first, last = (int(x) for x in args.pages.split("-"))
 
     stage(0)
-    asr = transcribe(args.audio, out / f"asr_{args.asr}.json", backend=args.asr,
+    asr = transcribe(args.audio, work / f"asr_{args.asr}.json", backend=args.asr,
                      progress=lambda f: stage(0, f))
     words = asr["words"]
     duration = audio_duration(args.audio)
@@ -222,6 +247,9 @@ def run() -> None:
     stage(2)
     result = align(words, book, voice=VoiceModel(load_audio(args.audio)))
     plan = build_plan(words, book, result, duration)
+    edits_file = work / "edits.json"
+    edits = json.loads(edits_file.read_text(encoding="utf-8")) if edits_file.exists() else []
+    apply_edits(plan, edits, words)
     plan["voice_accuracy"] = result["voice_accuracy"]
     if result["voice_accuracy"] is not None:
         print(f"      voice check: tells reader from commentator in "
@@ -235,7 +263,7 @@ def run() -> None:
     if main_clips or backup_clips:
         stage(3)
         placed = place_all(args.audio, main_clips + backup_clips)
-        save(placed, out / "sync.json")
+        save(placed, work / "sync.json")
         names = {str(c) for c in main_clips}
         main = [p for p in placed if p.path in names]
         backup = [p for p in placed if p.path not in names]
@@ -259,7 +287,7 @@ def run() -> None:
     if ready_video:
         info = probe_video(args.audio)
         fps = info["fps"]
-        timeline_audio = resolve_friendly(args.audio, out)
+        timeline_audio = resolve_friendly(args.audio, res)
         # Stop two frames short of the file's real end: a clip asking for even one frame
         # more than the file holds is reported by Resolve as "file not found".
         import subprocess
@@ -272,7 +300,7 @@ def run() -> None:
                     "duration": clip_end}]
         # The sound goes into the timeline as its own WAV file. Resolve imports a
         # separate sound file reliably, and refused the sound of the video file itself.
-        wav = out / "lesson_audio.wav"
+        wav = res / "lesson_audio.wav"
         if not made_from(wav, args.audio):
             subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(args.audio), "-vn",
                             "-c:a", "pcm_s16le", "-ar", "48000", str(wav)], check=True)
@@ -285,9 +313,9 @@ def run() -> None:
     look = json.dumps([stamp(args.pdf), args.page_offset, args.window, args.overlay_size,
                        args.overlay_pos, stamp(args.background) if args.background else None,
                        VIEW_VERSION], sort_keys=True)
-    views_dir = out / "views" / hashlib.sha1(look.encode()).hexdigest()[:10]
-    if (out / "views").exists():
-        for old in (out / "views").iterdir():
+    views_dir = res / "pages" / hashlib.sha1(look.encode()).hexdigest()[:10]
+    if (res / "pages").exists():
+        for old in (res / "pages").iterdir():
             if old != views_dir:
                 shutil.rmtree(old) if old.is_dir() else old.unlink()
     for n, v in enumerate(plan["views"]):
@@ -306,7 +334,7 @@ def run() -> None:
                      has_audio=c.get("has_audio", False))
     for v in plan["views"]:
         tl.add_video(2, Path(v["file"]), v["t0"], v["t1"], still=True)
-    tl.write_fcp7_xml(out / "timeline.xml")
+    tl.write_fcp7_xml(res / "timeline.xml")
     plan["warnings"] = checks(plan, args, text, asr.get("repaired_gaps", 0))
     # What produced this result, so it can be explained or reproduced later.
     plan["run"] = {
@@ -316,7 +344,7 @@ def run() -> None:
                      for k, v in vars(args).items() if k not in ("json_progress", "no_preview")},
         "transcript": asr.get("backend"),
     }
-    (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding="utf-8")
+    (work / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding="utf-8")
 
     read = [s for s in plan["segments"] if s["kind"] == "read"]
     lines = [f"reading {sum(s['t1'] - s['t0'] for s in read) / 60:.1f} min of {duration / 60:.1f} min, "
@@ -331,16 +359,16 @@ def run() -> None:
     if sync_lines:
         lines += ["", "camera clips:"] + sync_lines
     if plan["warnings"]:
-        lines += ["", "notes:"] + ["- " + w for w in plan["warnings"]]
+        lines += ["", "notes:"] + ["- " + w["text"] for w in plan["warnings"]]
         for w in plan["warnings"]:
-            print("      note: " + w, file=sys.stderr)
-    (out / "report.txt").write_text("\n".join(lines), encoding="utf-8")
+            print("      note: " + w["text"], file=sys.stderr)
+    (rev / "report.txt").write_text("\n".join(lines), encoding="utf-8")
     print(lines[0], file=sys.stderr)
 
     if not args.no_preview:
         stage(6)
-        render_preview(plan, args.audio, camera_placeholder(out / "camera_placeholder.png"),
-                       out / "preview.mp4")
+        render_preview(plan, args.audio, camera_placeholder(work / "camera_placeholder.png"),
+                       rev / "preview.mp4")
     print(f"done: {out}", file=sys.stderr)
     if args.json_progress:
         print(json.dumps({"done": True}), flush=True)

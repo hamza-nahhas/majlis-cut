@@ -27,7 +27,7 @@ from .book import guess_page_offset, load_turath_pages, turath_catalog, turath_v
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "cache"
-STATE_FILE = ROOT / "ui_state.json"
+STATE_FILE = Path(os.environ.get("DARSMONTAGE_STATE") or ROOT / "ui_state.json")   # tests use their own
 PAGE = Path(__file__).with_name("ui.html")
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -244,8 +244,14 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     self._bytes(doc[idx].get_pixmap(dpi=80).tobytes("png"), "image/png")
             elif url.path == "/api/result":
-                plan = Path(q.get("out") or JOB.out) / "plan.json"
-                self._json(json.loads(plan.read_text(encoding="utf-8")) if plan.exists() else {})
+                out = Path(q.get("out") or JOB.out)
+                plan = out / "work" / "plan.json"
+                data = json.loads(plan.read_text(encoding="utf-8")) if plan.exists() else {}
+                if data:
+                    edits = out / "work" / "edits.json"
+                    now = json.loads(edits.read_text(encoding="utf-8")) if edits.exists() else []
+                    data["pending_edits"] = now != data.get("edits", [])
+                self._json(data)
             elif url.path == "/api/file":
                 path = Path(q["path"])
                 if path.is_file() and self._inside_output(path):
@@ -286,6 +292,22 @@ class Handler(BaseHTTPRequestHandler):
                 save_state(body)
                 JOB.start(body)
                 self._json({"ok": True})
+            elif url.path == "/api/edit":
+                # Flip one segment between book and camera; flipping it back removes the edit.
+                out = Path(body["out"])
+                if not self._inside_output(out / "work"):
+                    self._json({"error": "not allowed"}, 403)
+                    return
+                path = out / "work" / "edits.json"
+                edits = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+                if body.get("undo") == "all":
+                    edits = []
+                elif body.get("undo"):
+                    edits = [e for e in edits if not (e["t0"] < body["t1"] - 0.05 and e["t1"] > body["t0"] + 0.05)]
+                else:
+                    edits.append({"t0": body["t0"], "t1": body["t1"], "to": body["to"]})
+                path.write_text(json.dumps(edits), encoding="utf-8")
+                self._json({"count": len(edits)})
             elif url.path == "/api/cancel":
                 JOB.cancel()
                 self._json({"ok": True})
@@ -300,11 +322,23 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": str(exc)}, 500)
 
 
+class Server(ThreadingHTTPServer):
+    # Windows would otherwise let two copies share one port, and requests meant
+    # for one would land on the other.
+    allow_reuse_address = False
+
+    def server_bind(self) -> None:
+        import socket
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def main() -> None:
-    port = 8765
+    port = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 8765
     while True:
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+            server = Server(("127.0.0.1", port), Handler)
             break
         except OSError:
             port += 1

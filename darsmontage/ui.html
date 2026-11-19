@@ -96,7 +96,7 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; background: #000;
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-inline-end: 6px; }
 .segs { list-style: none; margin: 0; padding: 0; max-height: 520px; overflow: auto;
   border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
-.segs li { display: grid; grid-template-columns: 52px 84px 1fr; gap: 8px; padding: 7px 10px;
+.segs li { display: grid; grid-template-columns: 52px 84px 1fr auto; gap: 8px; padding: 7px 10px;
   border-bottom: 1px solid var(--line); cursor: pointer; align-items: baseline; }
 .segs li:hover { background: var(--accent-soft); }
 .segs li.on { box-shadow: inset -3px 0 0 var(--accent); background: var(--accent-soft); }
@@ -106,6 +106,11 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; background: #000;
 .tag.talk { background: var(--cam-soft); color: var(--cam); }
 .segs .words { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .segs .flag { color: var(--bad); font-size: 12px; font-weight: 700; }
+.segs li.changed { opacity: .55; }
+.flip { min-height: 26px; padding: 0 8px; font-size: 12px; visibility: hidden; }
+.segs li:hover .flip, .segs li.on .flip, .flip:disabled { visibility: visible; }
+.warnings li.go { cursor: pointer; text-decoration: underline dotted; }
+.applybar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .cams { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
 .cams th, .cams td { text-align: start; padding: 5px 8px; border-bottom: 1px solid var(--line); }
 .cams td.name { direction: ltr; text-align: left; }
@@ -263,13 +268,21 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; background: #000;
       <div class="legend"><span><i style="background:var(--book)"></i>الكتاب على الشاشة</span>
         <span><i style="background:var(--cam);opacity:.55"></i>الكاميرا</span></div>
       <div class="row" style="margin-top:12px">
-        <button id="openOut">فتح مجلد المخرجات</button>
+        <button id="openOut">فتح مجلد Resolve</button>
       </div>
+      <div class="hint" id="resolvePath" style="direction:ltr;text-align:left;overflow-wrap:anywhere;margin-top:6px"></div>
       <div class="note">في DaVinci Resolve افتح القائمة <b dir="ltr">File &gt; Import &gt; Timeline</b> واختر الملف
-        <b dir="ltr">timeline.xml</b> من مجلد المخرجات. الكاميرات في المسار V1، وصور الصفحات في V2، والصوت الرئيسي في A1.</div>
+        <b dir="ltr">timeline.xml</b> من مجلد <b dir="ltr">resolve</b>. الكاميرات في المسار V1، وصور الصفحات في V2، والصوت الرئيسي في A1.</div>
       <table class="cams hidden" id="cams"></table>
     </div>
-    <ul class="segs" id="segs"></ul>
+    <div>
+      <div class="applybar">
+        <button class="primary hidden" id="applyEdits" style="padding:6px 16px;font-size:14px">تطبيق التصحيحات</button>
+        <button class="ghost hidden" id="undoAll">إلغاء كل التصحيحات</button>
+        <span class="hint" id="editHint">مرّر على مقطع لتقلبه بين كتاب وكاميرا.</span>
+      </div>
+      <ul class="segs" id="segs"></ul>
+    </div>
   </div>
 </section>
 
@@ -279,7 +292,13 @@ const $ = id => document.getElementById(id);
 const form = { audio: "", pdf: "", out: "", cam_main: [], cam_backup: [], book_id: null, book_name: "",
                vol: "", page_offset: 0, pages: "", window: 0.55, asr: "whisper",
                overlay_size: 1, overlay_pos: "center", background: "" };
-let plan = null, pollTimer = null, saveTimer = null;
+let plan = null, pollTimer = null, saveTimer = null, pending = 0, currentOut = "";
+function showPending(n) {
+  pending = n;
+  $("applyEdits").classList.toggle("hidden", !n);
+  $("editHint").textContent = n ? "اضغط «تطبيق التصحيحات» لإعادة كتابة الخط الزمني والمعاينة."
+    : "مرّر على مقطع لتقلبه بين كتاب وكاميرا.";
+}
 
 async function api(path, body) {
   const res = await fetch(path, body === undefined ? {} :
@@ -437,6 +456,15 @@ $("run").addEventListener("click", async () => {
   } catch (err) { $("runMsg").textContent = err.message; }
 });
 $("cancel").addEventListener("click", () => api("/api/cancel", {}));
+async function rerun() {
+  await api("/api/run", { ...form, out: currentOut || form.out, elevenlabs_key: $("elevenlabs_key").value.trim() });
+  poll();
+}
+$("applyEdits").addEventListener("click", () => rerun().catch(err => { $("runMsg").textContent = err.message; }));
+$("undoAll").addEventListener("click", async () => {
+  await api("/api/edit", { out: currentOut, undo: "all", t0: 0, t1: 0 });
+  rerun().catch(err => { $("runMsg").textContent = err.message; });
+});
 
 function showJob(job) {
   const running = job.state === "running";
@@ -492,11 +520,18 @@ async function loadResult(out) {
   }));
   const warnings = plan.warnings || [];
   $("warnings").classList.toggle("hidden", !warnings.length);
-  $("warnings").replaceChildren(...warnings.map(text => {
-    const li = document.createElement("li"); li.textContent = text; return li; }));
+  $("warnings").replaceChildren(...warnings.map(w => {
+    const li = document.createElement("li"); li.textContent = w.text;
+    if (w.t != null) { li.className = "go"; li.title = "انتقل إلى هذا الموضع";
+      li.addEventListener("click", () => { $("video").currentTime = Math.max(0, w.t - 3); $("video").play(); }); }
+    return li; }));
+  pending = 0; showPending(plan.pending_edits ? 1 : 0);
+  $("undoAll").classList.toggle("hidden", !(plan.edits && plan.edits.length));
+  currentOut = out;
   const sep = out.includes("\\") ? "\\" : "/";
-  $("video").src = "/api/file?path=" + encodeURIComponent(out + sep + "preview.mp4") + "&v=" + Date.now();
-  $("openOut").onclick = () => api("/api/open", { path: out });
+  $("video").src = "/api/file?path=" + encodeURIComponent(out + sep + "review" + sep + "preview.mp4") + "&v=" + Date.now();
+  $("openOut").onclick = () => api("/api/open", { path: out + sep + "resolve" });
+  $("resolvePath").textContent = out + sep + "resolve" + sep + "timeline.xml";
 
   const head = $("head");
   $("strip").replaceChildren(...plan.segments.map(s => {
@@ -515,7 +550,17 @@ async function loadResult(out) {
     w.textContent = (s.first_words || "") + (s.last_words ? " … " + s.last_words : "");
     if (s.by === "voice") { const f = document.createElement("span"); f.className = "flag";
       f.textContent = " (بالصوت فقط: راجِع) "; w.prepend(f); }
-    li.append(t, tag, w);
+    const flip = document.createElement("button"); flip.className = "flip";
+    flip.textContent = s.manual ? "تراجع" : (s.kind === "read" ? "← كاميرا" : "← كتاب");
+    flip.title = s.manual ? "ألغِ هذا التصحيح" : (s.kind === "read" ? "اجعل هذا المقطع كاميرا" : "اجعل هذا المقطع كتابًا");
+    flip.addEventListener("click", async e => {
+      e.stopPropagation();
+      await api("/api/edit", { out: currentOut, t0: s.t0, t1: s.t1,
+        to: s.kind === "read" ? "talk" : "read", undo: s.manual ? "one" : "" });
+      flip.disabled = true; li.classList.add("changed"); showPending(pending + 1);
+    });
+    if (s.manual) { const m = document.createElement("span"); m.className = "flag"; m.textContent = " (مصحَّح) "; w.prepend(m); }
+    li.append(t, tag, w, flip);
     li.addEventListener("click", () => { $("video").currentTime = s.t0 + 0.05; $("video").play(); });
     return li;
   }));

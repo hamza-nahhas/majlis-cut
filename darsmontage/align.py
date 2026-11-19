@@ -217,7 +217,7 @@ def align(words: list[dict], book: Book, min_read_s: float = 3.0,
     return {"runs": runs, "pos": pos, "tokens": t, "src": src,
             "n_anchors": len(anchors), "n_path": len(path),
             "voice": voice if heard else None,
-            "voice_accuracy": voice.accuracy if heard else None}
+            "voice_accuracy": voice.accuracy if heard and voice.accuracy == voice.accuracy else None}
 
 
 def _boundary(end_prev: float, start_next: float) -> float:
@@ -378,3 +378,81 @@ def build_plan(words: list[dict], book: Book, result: dict, duration: float,
     if duration - cursor > 0.05:
         full.append(talk(cursor, duration))
     return {"duration": duration, "segments": full, "views": views}
+
+
+def apply_edits(plan: dict, edits: list[dict], words: list[dict]) -> None:
+    """Apply the reviewer's corrections: time ranges forced to the camera or to the book.
+
+    Each edit is {"t0", "t1", "to": "talk" | "read"}. A range forced to the book shows
+    the page that was on screen just before it (or just after, at the very start).
+    """
+    plan["edits"] = edits
+    if not edits:
+        return
+    views = plan["views"]
+    for e in edits:
+        a, b = e["t0"], e["t1"]
+        near = [v for v in views if v["t1"] <= a + 0.01][-1:] or [v for v in views if v["t0"] >= b - 0.01][:1]
+        kept: list[dict] = []
+        for v in views:
+            if v["t1"] <= a or v["t0"] >= b:
+                kept.append(v)
+                continue
+            if v["t0"] < a:
+                kept.append(dict(v, t1=a))
+            if v["t1"] > b:
+                kept.append(dict(v, t0=b))
+        if e["to"] == "read" and near:
+            kept.append({"t0": a, "t1": b, "page": near[0]["page"], "stop": near[0]["stop"],
+                         "printed": near[0]["printed"], "manual": True})
+        views = sorted(kept, key=lambda v: v["t0"])
+    plan["views"] = views
+
+    starts = np.array([w["t0"] for w in words])
+    old_read = [s for s in plan["segments"] if s["kind"] == "read"]
+
+    def said(a: float, b: float) -> tuple[str, str]:
+        w0, w1 = int(np.searchsorted(starts, a)), int(np.searchsorted(starts, b - 0.1))
+        text = [w["w"] for w in words[w0:w1]]
+        return " ".join(text[:8]), " ".join(text[-6:]) if len(text) > 8 else ""
+
+    def touched(a: float, b: float) -> bool:
+        return any(e["t0"] < b and e["t1"] > a for e in edits)
+
+    segments: list[dict] = []
+    cursor = 0.0
+
+    def close(a: float, b: float, kind: str, group: list[dict]) -> None:
+        if b - a <= 0.05:
+            return
+        if kind == "talk":
+            # A range the reviewer sent to the camera stays a row of its own, so it can be undone.
+            for e in edits:
+                if e["to"] == "talk" and a < e["t0"] + 0.01 and e["t1"] - 0.01 < b and (e["t0"] - a > 0.05 or b - e["t1"] > 0.05):
+                    close(a, e["t0"], "talk", [])
+                    close(e["t0"], e["t1"], "talk", [])
+                    close(e["t1"], b, "talk", [])
+                    return
+        first, last = said(a, b)
+        seg = {"t0": a, "t1": b, "kind": kind, "first_words": first, "last_words": last,
+               "manual": touched(a, b)}
+        if kind == "read":
+            mid = (a + b) / 2
+            was = next((s for s in old_read if s["t0"] <= mid < s["t1"]), None)
+            seg["by"] = was["by"] if was else "manual"
+            seg["pages"] = sorted({v["printed"] for v in group})
+        segments.append(seg)
+
+    group: list[dict] = []
+    for v in views:
+        if group and (v["t0"] - group[-1]["t1"] > 0.05 or v.get("manual") != group[-1].get("manual")):
+            close(group[0]["t0"], group[-1]["t1"], "read", group)
+            cursor, group = group[-1]["t1"], []
+        if not group:
+            close(cursor, v["t0"], "talk", [])
+        group.append(v)
+    if group:
+        close(group[0]["t0"], group[-1]["t1"], "read", group)
+        cursor = group[-1]["t1"]
+    close(cursor, plan["duration"], "talk", [])
+    plan["segments"] = segments
