@@ -58,10 +58,12 @@ class Job:
         self.p: float | None = None
         self.out = ""
         self.has_cameras = False
+        self.error = ""
         self.log: deque[str] = deque(maxlen=60)
 
     def status(self) -> dict:
         return {"state": self.state, "stage": self.stage, "p": self.p, "out": self.out,
+                "error": self.error,
                 "has_cameras": self.has_cameras, "stages": STAGES, "log": list(self.log)[-12:]}
 
     def start(self, cfg: dict) -> None:
@@ -87,6 +89,7 @@ class Job:
         self.state, self.stage, self.p, self.out = "running", -1, None, cfg["out"]
         self.has_cameras = bool(cfg.get("cam_main") or cfg.get("cam_backup"))
         self.log.clear()
+        self.error = ""
         self.proc = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, text=True, encoding="utf-8",
                                      errors="replace", creationflags=NO_WINDOW)
@@ -102,6 +105,8 @@ class Job:
                 continue
             if "stage" in msg:
                 self.stage, self.p = msg["stage"], msg.get("p")
+            if "error" in msg:
+                self.error = msg["error"]
         code = proc.wait()
         if self.proc is proc and self.state == "running":
             self.state = "done" if code == 0 else "failed"

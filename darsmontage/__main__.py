@@ -7,13 +7,18 @@ For the graphical interface run:  python -m darsmontage.ui
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import shutil
 import sys
 from pathlib import Path
 
 from .align import align, build_plan
-from .asr import audio_duration, transcribe
-from .book import build_book, load_turath_pages, render_view
+from .asr import audio_duration, stamp, transcribe
+from .book import build_book, guess_page_offset, load_turath_pages, render_view
+
+VERSION = "0.2"
+VIEW_VERSION = 1     # raise when the way page pictures are drawn changes
 from .export import Timeline, camera_placeholder, render_preview
 from .sync import camera_track, place_all, probe_video, save
 from .voice import VoiceModel, load_audio
@@ -53,14 +58,105 @@ def resolve_friendly(video: Path, out: Path) -> Path:
         return video
     # A short plain name: Resolve failed to find the copy under a long Arabic file name.
     target = out / "lesson_video.mov"
-    if not target.exists():
+    if not made_from(target, video):
         print("      converting the video to a file Resolve can open…", file=sys.stderr, flush=True)
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-map", "0:v:0", "-map", "0:a:0",
                         "-c:v", "copy", "-c:a", "pcm_s16le", "-ar", "48000", str(target)], check=True)
+        mark_made_from(target, video)
     return target
 
 
+def made_from(target: Path, source: Path) -> bool:
+    """True when `target` exists and was produced from this very `source` file."""
+    note = target.with_name(target.name + ".source.json")
+    try:
+        return target.exists() and json.loads(note.read_text(encoding="utf-8")) == stamp(source)
+    except (OSError, ValueError):
+        return False
+
+
+def mark_made_from(target: Path, source: Path) -> None:
+    target.with_name(target.name + ".source.json").write_text(
+        json.dumps(stamp(source), ensure_ascii=False), encoding="utf-8")
+
+
+def checks(plan: dict, args, text: dict[int, str], repaired: int) -> list[str]:
+    """Things about this result a person should look at, in plain words."""
+    notes: list[str] = []
+    read = [s for s in plan["segments"] if s["kind"] == "read"]
+    share = sum(s["t1"] - s["t0"] for s in read) / max(1.0, plan["duration"])
+    if share < 0.03:
+        notes.append("لم يُعثر تقريبًا على قراءة تطابق الكتاب. تحقق من أن الكتاب والمجلد المختارين هما المقروءان "
+                     "في هذا الدرس، ومن أن الصفحات المقروءة موجودة في ملف الـPDF.")
+    guess, margin = guess_page_offset(args.pdf, text)
+    if margin > 0.15 and guess != args.page_offset:
+        notes.append(f"فرق ترقيم الصفحات المُدخل ({args.page_offset}) يخالف المكتشَف من الملف ({guess}). "
+                     "إن صحّ المكتشَف فالصفحات المعروضة الآن ليست الصفحات المقروءة.")
+    elif margin <= 0.15:
+        notes.append("تعذّر التأكد آليًّا من فرق ترقيم الصفحات. راجع المعاينة في قسم الكتاب، "
+                     "فقد تكون طبعة الملف غير طبعة النص.")
+    by_text = [s for s in read if s["by"] == "text"]
+    for a, b in zip(by_text, by_text[1:]):
+        if b["pages"][0] < a["pages"][-1] - 2:
+            notes.append(f"عند {mmss(b['t0'])} رجعت القراءة من صفحة {a['pages'][-1]} إلى صفحة {b['pages'][0]}. راجع هذا الموضع.")
+        elif b["pages"][0] > a["pages"][-1] + 10:
+            notes.append(f"عند {mmss(b['t0'])} قفزت القراءة من صفحة {a['pages'][-1]} إلى صفحة {b['pages'][0]}. راجع هذا الموضع.")
+    accuracy = plan.get("voice_accuracy")
+    if read and accuracy is None:
+        notes.append("لم يتيسّر تعلّم صوتَي القارئ والمعلّق من هذا الدرس، فاعتُمد على مطابقة النص وحدها.")
+    elif accuracy is not None and accuracy < 0.8:
+        notes.append(f"تمييز صوت القارئ من المعلّق ضعيف في هذا الدرس ({accuracy:.0%}). راجع حدود المقاطع بعناية أكبر.")
+    voiced = sum(1 for s in read if s["by"] == "voice")
+    if voiced:
+        notes.append(f"{voiced} مقطع حُسب قراءةً بالصوت وحده دون مطابقة نص. هي معلَّمة في القائمة.")
+    lost = [c["name"] for c in plan.get("cameras", []) if not c["ok"]]
+    if lost:
+        notes.append("مقاطع كاميرا لم تُزامَن وتحتاج وضعًا يدويًّا: " + "، ".join(lost))
+    if repaired:
+        notes.append(f"أُعيد تفريغ {repaired} موضع أسقطه التفريغ الأول.")
+    return notes
+
+
+def explain(exc: Exception) -> str:
+    """A failure in words the person running the tool can act on."""
+    import subprocess
+
+    name = type(exc).__name__
+    if isinstance(exc, FileNotFoundError) and getattr(exc, "filename", None) in ("ffmpeg", "ffprobe"):
+        return "برنامج ffmpeg غير مثبّت أو غير موجود في مسار النظام."
+    if isinstance(exc, FileNotFoundError):
+        return f"ملف غير موجود: {exc.filename}"
+    if isinstance(exc, subprocess.CalledProcessError):
+        return ("تعذّر على ffmpeg قراءة أحد الملفات أو كتابته. تأكد من سلامة ملف التسجيل، "
+                "ومن أن ملفات المخرجات غير مفتوحة في برنامج آخر.")
+    if isinstance(exc, PermissionError):
+        return f"لا يمكن الكتابة في: {exc.filename}. أغلق الملف إن كان مفتوحًا في برنامج آخر."
+    if "requests" in type(exc).__module__:
+        return "تعذّر الاتصال بالإنترنت لتنزيل نص الكتاب أو للتفريغ السحابي."
+    if isinstance(exc, LessonError):
+        return str(exc)
+    return f"خطأ غير متوقع ({name}): {exc}"
+
+
+class LessonError(Exception):
+    """A problem with the lesson's inputs, already worded for the user."""
+
+
 def main() -> None:
+    json_mode = "--json-progress" in sys.argv
+    try:
+        run()
+    except Exception as exc:  # noqa: BLE001 - every failure is reported in plain words
+        import traceback
+        traceback.print_exc()
+        message = explain(exc)
+        print(f"\nERROR: {message}", file=sys.stderr, flush=True)
+        if json_mode:
+            print(json.dumps({"error": message}, ensure_ascii=False), flush=True)
+        sys.exit(1)
+
+
+def run() -> None:
     ap = argparse.ArgumentParser(prog="darsmontage", description=__doc__.splitlines()[0])
     ap.add_argument("--audio", required=True, type=Path, help="master audio recording of the lesson")
     ap.add_argument("--pdf", required=True, type=Path, help="the book PDF shown on screen")
@@ -108,10 +204,20 @@ def main() -> None:
                      progress=lambda f: stage(0, f))
     words = asr["words"]
     duration = audio_duration(args.audio)
+    if not words:
+        raise LessonError("لم يُستخرج أي كلام من التسجيل. تأكد من أن الملف فيه صوت مسموع.")
 
     stage(1)
     text = load_turath_pages(args.turath, args.vol, args.cache or out.parent / "_books")
-    book = build_book(args.pdf, text, args.page_offset, first, last, args.window)
+    if not text:
+        raise LessonError(f"المجلد «{args.vol}» لا نص له في هذا الكتاب.")
+    try:
+        book = build_book(args.pdf, text, args.page_offset, first, last, args.window)
+    except (ValueError, IndexError):
+        book = None
+    if book is None or not book.words:
+        raise LessonError("لا توجد صفحات مشتركة بين ملف الـPDF ونص الكتاب بفرق الترقيم المُدخل. "
+                          "استعمل «اكتشاف تلقائي» في قسم الكتاب.")
 
     stage(2)
     result = align(words, book, voice=VoiceModel(load_audio(args.audio)))
@@ -167,14 +273,25 @@ def main() -> None:
         # The sound goes into the timeline as its own WAV file. Resolve imports a
         # separate sound file reliably, and refused the sound of the video file itself.
         wav = out / "lesson_audio.wav"
-        if not wav.exists():
+        if not made_from(wav, args.audio):
             subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(args.audio), "-vn",
                             "-c:a", "pcm_s16le", "-ar", "48000", str(wav)], check=True)
+            mark_made_from(wav, args.audio)
         timeline_audio = wav
 
     stage(4)
+    # Page pictures live in a folder named after everything that shapes them, so a
+    # changed PDF, page numbering, size or background can never reuse old pictures.
+    look = json.dumps([stamp(args.pdf), args.page_offset, args.window, args.overlay_size,
+                       args.overlay_pos, stamp(args.background) if args.background else None,
+                       VIEW_VERSION], sort_keys=True)
+    views_dir = out / "views" / hashlib.sha1(look.encode()).hexdigest()[:10]
+    if (out / "views").exists():
+        for old in (out / "views").iterdir():
+            if old != views_dir:
+                shutil.rmtree(old) if old.is_dir() else old.unlink()
     for n, v in enumerate(plan["views"]):
-        v["file"] = str(render_view(book, v["page"], v["stop"], out / "views",
+        v["file"] = str(render_view(book, v["page"], v["stop"], views_dir,
                                     scale=args.overlay_size, pos=args.overlay_pos,
                                     background=args.background))
         if n % 10 == 0:
@@ -190,6 +307,15 @@ def main() -> None:
     for v in plan["views"]:
         tl.add_video(2, Path(v["file"]), v["t0"], v["t1"], still=True)
     tl.write_fcp7_xml(out / "timeline.xml")
+    plan["warnings"] = checks(plan, args, text, asr.get("repaired_gaps", 0))
+    # What produced this result, so it can be explained or reproduced later.
+    plan["run"] = {
+        "tool_version": VERSION,
+        "inputs": {"audio": stamp(args.audio), "pdf": stamp(args.pdf)},
+        "settings": {k: (str(v) if isinstance(v, Path) else [str(x) for x in v] if isinstance(v, list) else v)
+                     for k, v in vars(args).items() if k not in ("json_progress", "no_preview")},
+        "transcript": asr.get("backend"),
+    }
     (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding="utf-8")
 
     read = [s for s in plan["segments"] if s["kind"] == "read"]
@@ -204,12 +330,16 @@ def main() -> None:
             lines.append(f"{mmss(s['t0'])} - {mmss(s['t1'])}  camera")
     if sync_lines:
         lines += ["", "camera clips:"] + sync_lines
+    if plan["warnings"]:
+        lines += ["", "notes:"] + ["- " + w for w in plan["warnings"]]
+        for w in plan["warnings"]:
+            print("      note: " + w, file=sys.stderr)
     (out / "report.txt").write_text("\n".join(lines), encoding="utf-8")
     print(lines[0], file=sys.stderr)
 
     if not args.no_preview:
         stage(6)
-        render_preview(plan, args.audio, camera_placeholder(out / "views" / "camera_placeholder.png"),
+        render_preview(plan, args.audio, camera_placeholder(out / "camera_placeholder.png"),
                        out / "preview.mp4")
     print(f"done: {out}", file=sys.stderr)
     if args.json_progress:

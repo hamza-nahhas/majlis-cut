@@ -70,9 +70,9 @@ def transcribe_whisper(audio: Path, out_json: Path, model: str = "large-v3-turbo
                 word_timestamps=True, vad_filter=True,
                 vad_parameters={"min_silence_duration_ms": 700},
                 condition_on_previous_text=False,
-                # One retry only: on noise or music the default six retries per
-                # half minute can stall a run for a very long time.
-                temperature=(0.0, 0.4),
+                # No random retries: the same recording must always give the same
+                # transcript, and on noise the retries can stall a run for a long time.
+                temperature=0.0,
             )
             for seg in segments:
                 for w in seg.words or []:
@@ -89,11 +89,54 @@ def transcribe_whisper(audio: Path, out_json: Path, model: str = "large-v3-turbo
             pos = end
             if progress:
                 progress(min(1.0, pos / duration))
+    words, repaired = repair_gaps(wm, samples, words, beam)
     result = {"audio": str(audio), "duration": duration, "backend": f"faster-whisper:{model}",
-              "words": words}
+              "source": stamp(audio), "repaired_gaps": repaired, "words": words}
     out_json.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     partial.unlink(missing_ok=True)
     return result
+
+
+def repair_gaps(wm, samples, words: list[dict], beam: int, min_gap: float = 4.0) -> tuple[list[dict], int]:
+    """Transcribe again, on their own, the stretches where speech was heard but no word came out.
+
+    On long recordings Whisper sometimes skips a passage (a recited verse, for one)
+    that it transcribes correctly when given that passage alone.
+    """
+    import numpy as np
+
+    if len(words) < 2:
+        return words, 0
+    sr = 16000
+
+    def loudness(a: float, b: float) -> float:
+        x = samples[int(a * sr):int(b * sr)]
+        return float(np.sqrt(np.mean(np.square(x)))) if len(x) else 0.0
+
+    spoken = np.median([loudness(w["t0"], w["t1"]) for w in words[:: max(1, len(words) // 400)]])
+    out: list[dict] = []
+    repaired = 0
+    for prev, nxt in zip(words, words[1:]):
+        out.append(prev)
+        a, b = prev["t1"], nxt["t0"]
+        if b - a < min_gap or loudness(a, b) < 0.25 * spoken:
+            continue                                   # short, or really a silence
+        segments, _ = wm.transcribe(samples[int(a * sr):int(b * sr)], language="ar", beam_size=beam,
+                                    word_timestamps=True, vad_filter=True,
+                                    condition_on_previous_text=False, temperature=0.0)
+        found = [{"t0": round(a + w.start, 3), "t1": round(a + w.end, 3), "w": w.word.strip(), "spk": None}
+                 for seg in segments for w in (seg.words or []) if w.word.strip()]
+        if found:
+            out.extend(found)
+            repaired += 1
+    out.append(words[-1])
+    return out, repaired
+
+
+def stamp(path: Path) -> dict:
+    """Identity of an input file: a cached result is reused only for the same file."""
+    st = Path(path).stat()
+    return {"path": str(Path(path).resolve()), "size": st.st_size, "mtime": int(st.st_mtime)}
 
 
 def transcribe_elevenlabs(audio: Path, out_json: Path, api_key: str | None = None,
@@ -123,16 +166,31 @@ def transcribe_elevenlabs(audio: Path, out_json: Path, api_key: str | None = Non
         if w.get("type", "word") == "word" and w.get("text", "").strip()
     ]
     result = {"audio": str(audio), "duration": audio_duration(audio),
-              "backend": "elevenlabs", "words": words}
+              "backend": "elevenlabs", "source": stamp(audio), "words": words}
     out_json.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     return result
 
 
 def transcribe(audio: Path, out_json: Path, backend: str = "whisper",
                progress: Progress | None = None) -> dict:
-    if out_json.exists():
-        return json.loads(out_json.read_text(encoding="utf-8"))
     out_json.parent.mkdir(parents=True, exist_ok=True)
+    partial = out_json.with_suffix(".partial.jsonl")
+    mark = out_json.with_suffix(".source.json")
+    if out_json.exists():
+        cached = json.loads(out_json.read_text(encoding="utf-8"))
+        source = cached.get("source")
+        if source is None:                      # written before sources were recorded
+            same = Path(cached.get("audio", "")).name in (audio.name, "")
+        else:
+            same = source["size"] == stamp(audio)["size"] and Path(source["path"]).name == audio.name
+        if same:
+            return cached
+        out_json.unlink()                       # belongs to another recording
+        partial.unlink(missing_ok=True)
+    # An unfinished transcription is resumed only for the recording it was started on.
+    if partial.exists() and (not mark.exists() or json.loads(mark.read_text(encoding="utf-8")) != stamp(audio)):
+        partial.unlink()
+    mark.write_text(json.dumps(stamp(audio), ensure_ascii=False), encoding="utf-8")
     if backend == "whisper":
         return transcribe_whisper(audio, out_json, progress=progress)
     if backend == "elevenlabs":
