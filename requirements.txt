@@ -1,0 +1,7 @@
+numpy
+scipy
+rapidfuzz
+pymupdf
+pillow
+requests
+faster-whisper

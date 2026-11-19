@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مونتاج الدروس</title>
+<style>
+:root {
+  --bg: #f5f2ec; --card: #fffdf9; --ink: #20242a; --muted: #6d7178; --line: #e2dccf;
+  --field: #ffffff; --accent: #0d6b5f; --accent-ink: #ffffff; --accent-soft: #e2f1ee;
+  --book: #a85f08; --book-soft: #fbeed9; --cam: #2b5cab; --cam-soft: #e3ecfa;
+  --bad: #b3261e; --bad-soft: #fbe9e7;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a; --card: #1c1f24; --ink: #e9e6e0; --muted: #9a9ea6; --line: #2f343b;
+    --field: #15181c; --accent: #46b8a6; --accent-ink: #0a1513; --accent-soft: #17322e;
+    --book: #e2a54b; --book-soft: #3a2c14; --cam: #7ea8ee; --cam-soft: #1b2a45;
+    --bad: #f0857c; --bad-soft: #3b1b18;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.7 "Segoe UI", Tahoma, "Noto Naskh Arabic", sans-serif; }
+header { max-width: 1040px; margin: 0 auto; padding: 28px 20px 6px; }
+header h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: 0; }
+header p { margin: 2px 0 0; color: var(--muted); }
+main { max-width: 1040px; margin: 0 auto; padding: 12px 20px 60px; display: grid; gap: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+.card h2 { margin: 0 0 12px; font-size: 17px; display: flex; align-items: center; gap: 10px; }
+.num { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--accent-ink);
+  display: inline-grid; place-items: center; font-size: 14px; font-weight: 700; }
+.field { display: grid; grid-template-columns: 170px 1fr; gap: 6px 14px; align-items: start; padding: 8px 0; }
+.field + .field { border-top: 1px dashed var(--line); }
+.field > label { font-weight: 600; padding-top: 6px; }
+.field small, .hint { color: var(--muted); font-size: 13px; display: block; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.path { flex: 1; min-width: 200px; direction: ltr; text-align: left; }
+input[type=text], input[type=number], input[type=password], select {
+  font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 10px; min-height: 36px; }
+input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--field); color: var(--ink); padding: 6px 14px; min-height: 36px; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
+  font-weight: 700; padding: 10px 26px; font-size: 16px; }
+button.ghost { border-color: transparent; color: var(--muted); padding: 6px 8px; }
+button:disabled { opacity: .5; cursor: default; }
+.paths { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; }
+.paths li { direction: ltr; text-align: left; background: var(--field); border: 1px solid var(--line);
+  border-radius: 6px; padding: 2px 10px; font-size: 13px; overflow-wrap: anywhere; }
+.results { list-style: none; margin: 6px 0 0; padding: 0; max-height: 230px; overflow: auto;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
+.results:empty { display: none; }
+.results li { padding: 6px 12px; cursor: pointer; border-bottom: 1px solid var(--line); }
+.results li:last-child { border-bottom: 0; }
+.results li:hover { background: var(--accent-soft); }
+.results small { color: var(--muted); margin-inline-start: 8px; }
+.chip { display: inline-flex; gap: 8px; align-items: center; background: var(--accent-soft);
+  border-radius: 999px; padding: 3px 14px; font-weight: 600; }
+.check { display: none; grid-template-columns: minmax(0, 300px) 1fr; gap: 16px; margin-top: 10px; }
+.check.on { display: grid; }
+.check img { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.check .text { white-space: pre-wrap; background: var(--field); border: 1px solid var(--line);
+  border-radius: 6px; padding: 10px 14px; max-height: 430px; overflow: auto; font-size: 16px; line-height: 1.9; }
+.note { border-radius: 8px; padding: 8px 14px; margin-top: 8px; background: var(--accent-soft); }
+.note.bad { background: var(--bad-soft); color: var(--bad); }
+.stages { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 6px; }
+.stages li { display: grid; grid-template-columns: 24px 1fr auto; gap: 8px; align-items: center; color: var(--muted); }
+.stages li.done { color: var(--ink); }
+.stages li.now { color: var(--accent); font-weight: 700; }
+.stages .mark { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); }
+.stages .done .mark { background: var(--accent); border-color: var(--accent); }
+.stages .now .mark { border-color: var(--accent); border-top-color: transparent; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 10px; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+pre.log { direction: ltr; text-align: left; white-space: pre-wrap; color: var(--muted); font-size: 12px;
+  max-height: 160px; overflow: auto; margin: 10px 0 0; }
+.stats { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.stat { border: 1px solid var(--line); border-radius: 10px; padding: 6px 14px; background: var(--field); }
+.stat b { display: block; font-size: 19px; line-height: 1.3; }
+.stat span { color: var(--muted); font-size: 13px; }
+.review { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+video { width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; background: #000; display: block; }
+.strip { direction: ltr; display: flex; height: 16px; border-radius: 4px; overflow: hidden; margin-top: 8px;
+  cursor: pointer; position: relative; background: var(--cam-soft); }
+.strip i { display: block; height: 100%; }
+.strip i.read { background: var(--book); }
+.strip i.talk { background: var(--cam); opacity: .55; }
+.strip .head { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink); pointer-events: none; }
+.legend { display: flex; gap: 16px; color: var(--muted); font-size: 13px; margin-top: 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-inline-end: 6px; }
+.segs { list-style: none; margin: 0; padding: 0; max-height: 520px; overflow: auto;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
+.segs li { display: grid; grid-template-columns: 52px 84px 1fr; gap: 8px; padding: 7px 10px;
+  border-bottom: 1px solid var(--line); cursor: pointer; align-items: baseline; }
+.segs li:hover { background: var(--accent-soft); }
+.segs li.on { box-shadow: inset -3px 0 0 var(--accent); background: var(--accent-soft); }
+.segs time { direction: ltr; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+.tag { border-radius: 5px; padding: 0 8px; font-size: 12px; font-weight: 700; text-align: center; white-space: nowrap; }
+.tag.read { background: var(--book-soft); color: var(--book); }
+.tag.talk { background: var(--cam-soft); color: var(--cam); }
+.segs .words { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.segs .flag { color: var(--bad); font-size: 12px; font-weight: 700; }
+.cams { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
+.cams th, .cams td { text-align: start; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+.cams td.name { direction: ltr; text-align: left; }
+.hidden { display: none !important; }
+@media (max-width: 760px) {
+  .field { grid-template-columns: 1fr; } .review, .check.on { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>مونتاج الدروس</h1>
+  <p>من تسجيل الدرس وملف الكتاب إلى خط زمني جاهز للمراجعة في DaVinci Resolve.</p>
+</header>
+<main>
+
+<section class="card">
+  <h2><span class="num">1</span> ملفات الدرس</h2>
+  <div class="field">
+    <label>تسجيل الدرس</label>
+    <div><div class="row"><input type="text" class="path" id="audio" placeholder="D:\lesson\lesson.mp3">
+      <button data-pick="audio" data-for="audio">اختيار…</button></div>
+      <small>التسجيل المتصل للدرس، وهو صوت الفيديو النهائي. إن كان عندك فيديو جاهز للدرس فاختره هنا واترك الكاميرات فارغة: يوضع الفيديو في الخط الزمني وتُضاف صفحات الكتاب فوقه.</small></div>
+  </div>
+  <div class="field">
+    <label>الكاميرا الأساسية</label>
+    <div><ul class="paths" id="cam_main_list"></ul>
+      <div class="row"><button data-cams="cam_main" data-kind="folder">مجلد…</button>
+        <button data-cams="cam_main" data-kind="videos">ملفات…</button>
+        <button class="ghost" data-clear="cam_main">مسح</button></div>
+      <small>اختياري. مقاطع هذا الدرس فقط؛ تُزامَن مع الصوت تلقائيًّا.</small></div>
+  </div>
+  <div class="field">
+    <label>كاميرا الاحتياط</label>
+    <div><ul class="paths" id="cam_backup_list"></ul>
+      <div class="row"><button data-cams="cam_backup" data-kind="folder">مجلد…</button>
+        <button data-cams="cam_backup" data-kind="videos">ملفات…</button>
+        <button class="ghost" data-clear="cam_backup">مسح</button></div>
+      <small>اختياري. تُستعمل في فجوات الكاميرا الأساسية فقط.</small></div>
+  </div>
+  <div class="field">
+    <label>مجلد المخرجات</label>
+    <div><div class="row"><input type="text" class="path" id="out">
+      <button data-pick="folder" data-for="out">اختيار…</button></div>
+      <small>يُقترح تلقائيًّا بجانب التسجيل الصوتي.</small></div>
+  </div>
+</section>
+
+<section class="card">
+  <h2><span class="num">2</span> الكتاب</h2>
+  <div class="field">
+    <label>ملف الكتاب PDF</label>
+    <div><div class="row"><input type="text" class="path" id="pdf" placeholder="D:\books\book.pdf">
+      <button data-pick="pdf" data-for="pdf">اختيار…</button></div>
+      <small>الملف الذي تُعرض صفحاته في الفيديو (مجلد واحد).</small></div>
+  </div>
+  <div class="field">
+    <label>نص الكتاب</label>
+    <div>
+      <div id="bookChosen" class="hidden"><span class="chip"><span id="bookName"></span>
+        <button class="ghost" id="bookChange">تغيير</button></span></div>
+      <div id="bookSearch">
+        <input type="text" id="bookQuery" style="width:100%" placeholder="ابحث باسم الكتاب، مثل: زاد المعاد">
+        <ul class="results" id="bookResults"></ul>
+      </div>
+      <small>من مكتبة turath.io. اختر الطبعة نفسها التي في ملف الـPDF ليوافق ترقيمها صفحاته.</small>
+    </div>
+  </div>
+  <div class="field">
+    <label>المجلد</label>
+    <div><select id="vol"></select></div>
+  </div>
+  <div class="field">
+    <label>ترقيم الصفحات</label>
+    <div>
+      <div class="row">
+        <span>صفحة الـPDF = الصفحة المطبوعة +</span>
+        <input type="number" id="page_offset" value="0" style="width:84px">
+        <button id="detect">اكتشاف تلقائي</button>
+        <button id="showCheck">معاينة</button>
+      </div>
+      <div class="note hidden" id="offsetNote"></div>
+      <div class="check" id="check">
+        <div><div class="row" style="margin-bottom:6px"><span>الصفحة المطبوعة</span>
+          <input type="number" id="checkPage" style="width:90px"></div>
+          <img id="checkImg" alt="صفحة الكتاب"></div>
+        <div><div class="hint" style="margin-bottom:6px">نص الصفحة نفسها في النسخة الرقمية. يجب أن يطابق الصورة.</div>
+          <div class="text" id="checkText"></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="field">
+    <label>حصر الصفحات</label>
+    <div><input type="text" id="pages" placeholder="مثال: 1-120" style="width:160px;direction:ltr">
+      <small>اختياري. يُترك فارغًا للبحث في المجلد كله.</small></div>
+  </div>
+</section>
+
+<section class="card">
+  <h2><span class="num">3</span> الإعدادات</h2>
+  <div class="field">
+    <label>مقدار الصفحة الظاهر</label>
+    <div><div class="row"><input type="range" id="window" min="0.35" max="1" step="0.05" value="0.55" style="flex:1;max-width:320px">
+      <b id="windowLabel"></b></div>
+      <small>كلما قلّ ظهر النص أكبر. نصف الصفحة مقروء على الشاشات الصغيرة.</small></div>
+  </div>
+  <div class="field">
+    <label>خلفية صفحة الكتاب</label>
+    <div><div class="row"><input type="text" class="path" id="background">
+      <button data-pick="image" data-for="background">اختيار…</button></div>
+      <small>اختياري. صورة تصميمكم بقياس الفيديو (فيها عنوان الكتاب والشعار)، وتوضع الصفحة فوقها. بدونها خلفية بلون واحد.</small></div>
+  </div>
+  <div class="field">
+    <label>بطاقة الصفحة</label>
+    <div><div class="row"><span>الحجم</span>
+      <input type="range" id="overlay_size" min="0.4" max="1" step="0.05" value="1" style="flex:1;max-width:240px">
+      <b id="overlaySizeLabel"></b>
+      <span>الموضع</span>
+      <select id="overlay_pos"><option value="right">يمين</option><option value="center">وسط</option><option value="left">يسار</option></select></div>
+      <small>الحجم نسبة من ارتفاع الإطار، والموضع مكان الصفحة على الخلفية.</small></div>
+  </div>
+  <div class="field">
+    <label>التفريغ الصوتي</label>
+    <div>
+      <label class="row"><input type="radio" name="asr" value="whisper" checked> على هذا الجهاز (مجاني، يستغرق نحو 40% من مدة الدرس)</label>
+      <label class="row"><input type="radio" name="asr" value="elevenlabs"> ElevenLabs (دقائق، مدفوع، يحتاج مفتاحًا)</label>
+      <input type="password" id="elevenlabs_key" class="hidden" placeholder="مفتاح ElevenLabs (لا يُحفظ)" style="width:320px;direction:ltr;margin-top:6px">
+      <small>التفريغ يُحفظ في مجلد المخرجات ولا يُعاد عند تكرار التشغيل.</small>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="row">
+    <button class="primary" id="run">تشغيل</button>
+    <button id="cancel" class="hidden">إيقاف</button>
+    <span id="runMsg" class="hint"></span>
+  </div>
+  <div id="progress" class="hidden">
+    <ul class="stages" id="stages"></ul>
+    <div class="bar"><i id="barFill"></i></div>
+    <pre class="log" id="log"></pre>
+  </div>
+</section>
+
+<section class="card hidden" id="result">
+  <h2>النتيجة</h2>
+  <div class="stats" id="stats"></div>
+  <div class="review">
+    <div>
+      <video id="video" controls preload="metadata"></video>
+      <div class="strip" id="strip"><span class="head" id="head"></span></div>
+      <div class="legend"><span><i style="background:var(--book)"></i>الكتاب على الشاشة</span>
+        <span><i style="background:var(--cam);opacity:.55"></i>الكاميرا</span></div>
+      <div class="row" style="margin-top:12px">
+        <button id="openOut">فتح مجلد المخرجات</button>
+      </div>
+      <div class="note">في DaVinci Resolve افتح القائمة <b dir="ltr">File &gt; Import &gt; Timeline</b> واختر الملف
+        <b dir="ltr">timeline.xml</b> من مجلد المخرجات. الكاميرات في المسار V1، وصور الصفحات في V2، والصوت الرئيسي في A1.</div>
+      <table class="cams hidden" id="cams"></table>
+    </div>
+    <ul class="segs" id="segs"></ul>
+  </div>
+</section>
+
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const form = { audio: "", pdf: "", out: "", cam_main: [], cam_backup: [], book_id: null, book_name: "",
+               vol: "", page_offset: 0, pages: "", window: 0.55, asr: "whisper",
+               overlay_size: 1, overlay_pos: "center", background: "" };
+let plan = null, pollTimer = null, saveTimer = null;
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} :
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => api("/api/state", form).catch(() => {}), 400);
+}
+function clock(t) {
+  const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = Math.floor(t % 60);
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
+}
+function note(el, text, bad) {
+  el.textContent = text; el.classList.toggle("bad", !!bad); el.classList.toggle("hidden", !text);
+}
+
+/* ---------- form ---------- */
+function paint() {
+  for (const id of ["audio", "pdf", "out", "pages", "page_offset", "background"]) $(id).value = form[id] ?? "";
+  $("window").value = form.window;
+  $("overlay_size").value = form.overlay_size;
+  $("overlay_pos").value = form.overlay_pos;
+  $("overlaySizeLabel").textContent = Math.round(form.overlay_size * 100) + "%";
+  $("windowLabel").textContent = form.window >= 0.99 ? "الصفحة كاملة" :
+    Math.abs(form.window - 0.55) < 0.03 ? "نصف صفحة تقريبًا" : Math.round(form.window * 100) + "% من الصفحة";
+  for (const r of document.querySelectorAll("input[name=asr]")) r.checked = r.value === form.asr;
+  $("elevenlabs_key").classList.toggle("hidden", form.asr !== "elevenlabs");
+  for (const key of ["cam_main", "cam_backup"]) {
+    $(key + "_list").replaceChildren(...form[key].map(p => {
+      const li = document.createElement("li"); li.textContent = p; return li; }));
+  }
+  $("bookChosen").classList.toggle("hidden", !form.book_id);
+  $("bookSearch").classList.toggle("hidden", !!form.book_id);
+  $("bookName").textContent = form.book_name;
+}
+for (const id of ["audio", "pdf", "out", "pages", "background"]) {
+  $(id).addEventListener("change", e => { form[id] = e.target.value.trim(); save(); });
+}
+$("page_offset").addEventListener("change", e => { form.page_offset = parseInt(e.target.value || "0", 10); save(); refreshCheck(); });
+$("window").addEventListener("input", e => { form.window = parseFloat(e.target.value); paint(); save(); });
+$("overlay_size").addEventListener("input", e => { form.overlay_size = parseFloat(e.target.value); paint(); save(); });
+$("overlay_pos").addEventListener("change", e => { form.overlay_pos = e.target.value; save(); });
+for (const r of document.querySelectorAll("input[name=asr]")) {
+  r.addEventListener("change", () => { form.asr = r.value; paint(); save(); });
+}
+for (const b of document.querySelectorAll("[data-pick]")) {
+  b.addEventListener("click", async () => {
+    const key = b.dataset.for;
+    const got = await api("/api/pick", { kind: b.dataset.pick, start: form[key] || form.audio || form.pdf });
+    if (!got.paths.length) return;
+    form[key] = got.paths[0];
+    if (got.suggest_out) form.out = got.suggest_out;
+    paint(); save();
+  });
+}
+for (const b of document.querySelectorAll("[data-cams]")) {
+  b.addEventListener("click", async () => {
+    const key = b.dataset.cams;
+    const got = await api("/api/pick", { kind: b.dataset.kind, start: form[key][0] || form.audio });
+    if (!got.paths.length) return;
+    form[key] = [...new Set([...form[key], ...got.paths])];
+    paint(); save();
+  });
+}
+for (const b of document.querySelectorAll("[data-clear]")) {
+  b.addEventListener("click", () => { form[b.dataset.clear] = []; paint(); save(); });
+}
+
+/* ---------- book ---------- */
+let searchTimer = null;
+$("bookQuery").addEventListener("input", e => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  searchTimer = setTimeout(async () => {
+    const hits = q.length < 2 ? [] : await api("/api/books?q=" + encodeURIComponent(q));
+    $("bookResults").replaceChildren(...hits.map(b => {
+      const li = document.createElement("li");
+      li.textContent = b.name;
+      const by = document.createElement("small"); by.textContent = b.author; li.append(by);
+      li.addEventListener("click", () => chooseBook(b));
+      return li;
+    }));
+  }, 250);
+});
+$("bookChange").addEventListener("click", () => { form.book_id = null; form.book_name = ""; paint(); $("bookQuery").focus(); });
+async function chooseBook(b) {
+  form.book_id = b.id; form.book_name = b.name; form.vol = "";
+  $("bookResults").replaceChildren(); paint();
+  await loadVolumes(); save();
+}
+async function loadVolumes() {
+  $("vol").replaceChildren();
+  if (!form.book_id) return;
+  const opt = document.createElement("option"); opt.textContent = "جارٍ تحميل نص الكتاب…"; $("vol").append(opt);
+  try {
+    const got = await api("/api/book?id=" + form.book_id);
+    $("vol").replaceChildren(...got.vols.map(v => {
+      const o = document.createElement("option");
+      o.value = v.vol; o.textContent = v.vol + "  (ص " + v.first + " – " + v.last + ")";
+      return o;
+    }));
+    if (!got.vols.some(v => v.vol === form.vol)) form.vol = got.vols[0] ? got.vols[0].vol : "";
+    $("vol").value = form.vol;
+  } catch (err) { opt.textContent = "تعذّر تحميل الكتاب: " + err.message; }
+}
+$("vol").addEventListener("change", e => { form.vol = e.target.value; save(); refreshCheck(); });
+
+function bookReady() { return form.pdf && form.book_id && form.vol !== ""; }
+$("detect").addEventListener("click", async () => {
+  if (!bookReady()) return note($("offsetNote"), "اختر ملف الـPDF والكتاب والمجلد أولًا.", true);
+  note($("offsetNote"), "جارٍ الفحص…");
+  try {
+    const got = await api(`/api/offset?pdf=${encodeURIComponent(form.pdf)}&id=${form.book_id}&vol=${encodeURIComponent(form.vol)}`);
+    form.page_offset = got.offset; $("checkPage").value = got.sample; paint(); save();
+    note($("offsetNote"), got.sure
+      ? `الفرق المكتشَف: ${got.offset}. تأكّد من المعاينة أن النص يطابق الصورة.`
+      : `أقرب فرق: ${got.offset}، لكن النتيجة غير مؤكدة. راجع المعاينة، وقد تكون الطبعة مختلفة.`, !got.sure);
+    $("check").classList.add("on"); refreshCheck();
+  } catch (err) { note($("offsetNote"), "تعذّر الفحص: " + err.message, true); }
+});
+$("showCheck").addEventListener("click", () => {
+  if (!bookReady()) return note($("offsetNote"), "اختر ملف الـPDF والكتاب والمجلد أولًا.", true);
+  $("check").classList.toggle("on");
+  if (!$("checkPage").value) $("checkPage").value = 20;
+  refreshCheck();
+});
+$("checkPage").addEventListener("change", refreshCheck);
+async function refreshCheck() {
+  if (!$("check").classList.contains("on") || !bookReady()) return;
+  const page = parseInt($("checkPage").value || "20", 10);
+  $("checkImg").src = `/api/pageimg?pdf=${encodeURIComponent(form.pdf)}&page=${page}&offset=${form.page_offset || 0}`;
+  try {
+    const got = await api(`/api/pagetext?id=${form.book_id}&vol=${encodeURIComponent(form.vol)}&page=${page}`);
+    $("checkText").textContent = got.text || "(لا نص لهذه الصفحة في النسخة الرقمية)";
+  } catch (err) { $("checkText").textContent = err.message; }
+}
+
+/* ---------- run ---------- */
+$("run").addEventListener("click", async () => {
+  const lacking = [];
+  if (!form.audio) lacking.push("التسجيل الصوتي");
+  if (!form.pdf) lacking.push("ملف الـPDF");
+  if (!form.book_id) lacking.push("نص الكتاب");
+  if (!form.out) lacking.push("مجلد المخرجات");
+  if (lacking.length) { $("runMsg").textContent = "ينقص: " + lacking.join("، "); return; }
+  $("runMsg").textContent = "";
+  try {
+    await api("/api/run", { ...form, elevenlabs_key: $("elevenlabs_key").value.trim() });
+    $("result").classList.add("hidden");
+    poll();
+  } catch (err) { $("runMsg").textContent = err.message; }
+});
+$("cancel").addEventListener("click", () => api("/api/cancel", {}));
+
+function showJob(job) {
+  const running = job.state === "running";
+  $("run").disabled = running;
+  $("cancel").classList.toggle("hidden", !running);
+  $("progress").classList.toggle("hidden", job.state === "idle");
+  $("stages").replaceChildren(...job.stages.map((name, n) => {
+    const li = document.createElement("li");
+    const skipped = n === 3 && !job.has_cameras;
+    const done = job.state === "done" || n < job.stage;
+    li.className = done ? "done" : (n === job.stage && running ? "now" : "");
+    const mark = document.createElement("span"); mark.className = "mark";
+    const label = document.createElement("span"); label.textContent = name + (skipped ? " (لا مقاطع)" : "");
+    const pct = document.createElement("span");
+    if (n === job.stage && running && job.p != null) pct.textContent = Math.round(job.p * 100) + "%";
+    li.append(mark, label, pct);
+    return li;
+  }));
+  const share = job.state === "done" ? 1 :
+    Math.max(0, (job.stage + (job.p || 0)) / job.stages.length);
+  $("barFill").style.width = (share * 100).toFixed(1) + "%";
+  $("log").textContent = job.state === "failed" ? job.log.join("\n") : "";
+  $("runMsg").textContent = { failed: "توقّف التشغيل بخطأ. التفاصيل أدناه.", cancelled: "أُوقف التشغيل.",
+    done: "اكتمل." }[job.state] || "";
+}
+async function poll() {
+  clearTimeout(pollTimer);
+  const job = await api("/api/status");
+  showJob(job);
+  if (job.state === "running") pollTimer = setTimeout(poll, 1000);
+  else if (job.state === "done") loadResult(job.out);
+}
+
+/* ---------- result ---------- */
+async function loadResult(out) {
+  plan = await api("/api/result?out=" + encodeURIComponent(out));
+  if (!plan.segments) return;
+  $("result").classList.remove("hidden");
+  const read = plan.segments.filter(s => s.kind === "read");
+  const readTime = read.reduce((a, s) => a + s.t1 - s.t0, 0);
+  const stats = [[clock(plan.duration), "مدة الدرس"], [clock(readTime), "قراءة من الكتاب"],
+    [read.length, "مقطع قراءة"], [plan.views.length, "لقطة صفحة"]];
+  const doubtful = read.filter(s => s.by === "voice").length;
+  if (doubtful) stats.push([doubtful, "مقطع يحتاج مراجعة"]);
+  if (plan.cameras && plan.cameras.length) {
+    stats.push([plan.cameras.filter(c => c.ok).length + " / " + plan.cameras.length, "مقطع كاميرا مُزامَن"]);
+  }
+  $("stats").replaceChildren(...stats.map(([value, label]) => {
+    const d = document.createElement("div"); d.className = "stat";
+    const b = document.createElement("b"); b.textContent = value;
+    const s = document.createElement("span"); s.textContent = label;
+    d.append(b, s); return d;
+  }));
+  const sep = out.includes("\\") ? "\\" : "/";
+  $("video").src = "/api/file?path=" + encodeURIComponent(out + sep + "preview.mp4") + "&v=" + Date.now();
+  $("openOut").onclick = () => api("/api/open", { path: out });
+
+  const head = $("head");
+  $("strip").replaceChildren(...plan.segments.map(s => {
+    const i = document.createElement("i"); i.className = s.kind;
+    i.style.width = ((s.t1 - s.t0) / plan.duration * 100) + "%";
+    i.title = clock(s.t0) + " – " + clock(s.t1);
+    return i;
+  }), head);
+  $("segs").replaceChildren(...plan.segments.map((s, n) => {
+    const li = document.createElement("li"); li.dataset.n = n;
+    const t = document.createElement("time"); t.textContent = clock(s.t0);
+    const tag = document.createElement("span"); tag.className = "tag " + s.kind;
+    tag.textContent = s.kind === "read" ? "ص " + (s.pages[0] === s.pages[s.pages.length - 1]
+      ? s.pages[0] : s.pages[0] + "–" + s.pages[s.pages.length - 1]) : "كاميرا";
+    const w = document.createElement("span"); w.className = "words";
+    w.textContent = (s.first_words || "") + (s.last_words ? " … " + s.last_words : "");
+    if (s.by === "voice") { const f = document.createElement("span"); f.className = "flag";
+      f.textContent = " (بالصوت فقط: راجِع) "; w.prepend(f); }
+    li.append(t, tag, w);
+    li.addEventListener("click", () => { $("video").currentTime = s.t0 + 0.05; $("video").play(); });
+    return li;
+  }));
+  const cams = $("cams");
+  cams.classList.toggle("hidden", !(plan.cameras && plan.cameras.length));
+  if (plan.cameras && plan.cameras.length) {
+    cams.innerHTML = "<tr><th>مقطع الكاميرا</th><th>النوع</th><th>يبدأ عند</th><th>الحالة</th></tr>";
+    for (const c of plan.cameras) {
+      const tr = document.createElement("tr");
+      const cells = [c.name, c.camera === "main" ? "أساسية" : "احتياط", c.ok ? clock(Math.max(0, c.offset)) : "—",
+        !c.ok ? "لم يُزامَن: ضعه يدويًّا" : Math.abs(c.drift_ms) > 40 ? "انجراف " + Math.round(c.drift_ms) + " مللي ثانية" : "مُزامَن"];
+      cells.forEach((text, k) => { const td = document.createElement("td"); td.textContent = text;
+        if (k === 0) td.className = "name"; tr.append(td); });
+      cams.append(tr);
+    }
+  }
+}
+$("strip").addEventListener("click", e => {
+  if (!plan) return;
+  const box = $("strip").getBoundingClientRect();
+  $("video").currentTime = (e.clientX - box.left) / box.width * plan.duration;
+});
+$("video").addEventListener("timeupdate", () => {
+  if (!plan) return;
+  const t = $("video").currentTime;
+  $("head").style.left = (t / plan.duration * 100) + "%";
+  const n = plan.segments.findIndex(s => t >= s.t0 && t < s.t1);
+  const cur = $("segs").querySelector("li.on");
+  if (cur && cur.dataset.n == n) return;
+  if (cur) cur.classList.remove("on");
+  const li = $("segs").children[n];
+  if (li) { li.classList.add("on"); li.scrollIntoView({ block: "nearest" }); }
+});
+
+/* ---------- start ---------- */
+(async () => {
+  const state = await api("/api/state");
+  Object.assign(form, state.form || {});
+  form.cam_main = form.cam_main || []; form.cam_backup = form.cam_backup || [];
+  paint();
+  await loadVolumes();
+  showJob(state.job);
+  if (state.job.state === "running") poll();
+  else if (state.job.state === "done") loadResult(state.job.out);
+  else if (form.out) loadResult(form.out).catch(() => {});      // last result, if still on disk
+})();
+</script>
+</body>
+</html>
