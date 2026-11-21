@@ -154,18 +154,18 @@ def camera_placeholder(out: Path, size: tuple[int, int] = (1920, 1080)) -> Path:
     return out
 
 
-def render_preview(plan: dict, audio: Path, placeholder: Path, out: Path, fps: int = 5,
-                   height: int = 720) -> Path:
-    """Low-resolution MP4 of the result: page views over reading, placeholder over commentary."""
+def render_preview(views: list[dict], duration: float, audio: Path, placeholder: Path, out: Path,
+                   fps: int = 5, height: int = 720) -> Path:
+    """Low-resolution MP4 of the result: page views over reading, placeholder elsewhere."""
     shots: list[tuple[Path, float]] = []
     cursor = 0.0
-    for v in plan["views"]:
+    for v in views:
         if v["t0"] - cursor > 0.01:
             shots.append((placeholder, v["t0"] - cursor))
         shots.append((Path(v["file"]), v["t1"] - v["t0"]))
         cursor = v["t1"]
-    if plan["duration"] - cursor > 0.01:
-        shots.append((placeholder, plan["duration"] - cursor))
+    if duration - cursor > 0.01:
+        shots.append((placeholder, duration - cursor))
     lines = []
     for path, dur in shots:
         lines.append(f"file '{path.resolve().as_posix()}'")

@@ -95,6 +95,8 @@ class Job:
             cmd += ["--pages", cfg["pages"]]
         if cfg.get("background"):
             cmd += ["--background", cfg["background"]]
+        if cfg.get("fill_with_book"):
+            cmd += ["--fill-with-book"]
         for flag, key in (("--cam-main", "cam_main"), ("--cam-backup", "cam_backup")):
             paths = [p for p in cfg.get(key) or [] if p]
             if paths:

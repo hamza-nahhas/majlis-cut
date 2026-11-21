@@ -13,7 +13,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from .align import align, apply_edits, build_plan
+from .align import align, apply_edits, build_plan, fill_gaps
 from .asr import audio_duration, stamp, transcribe
 from .book import build_book, guess_page_offset, load_turath_pages, read_pdf_text, render_view
 
@@ -202,6 +202,8 @@ def run() -> None:
                     help="main camera clips of this lesson (files or a folder)")
     ap.add_argument("--cam-backup", type=Path, nargs="*", default=[],
                     help="backup camera clips, used only where the main camera is missing")
+    ap.add_argument("--fill-with-book", action="store_true",
+                    help="where no camera clip and no page would be on screen, keep the last page shown")
     ap.add_argument("--fps", type=float, default=25.0,
                     help="timeline frame rate when no camera clips are given")
     ap.add_argument("--cache", type=Path, help="where downloaded book texts are kept")
@@ -335,13 +337,19 @@ def run() -> None:
             stage(4, n / max(1, len(plan["views"])))
 
     stage(5)
-    tl = Timeline(args.audio.stem, fps)
     sound_end = cameras[0]["t1"] if ready_video else duration
+    # What goes on the page track: the reading, and with --fill-with-book every empty place too.
+    shown = plan["views"]
+    if args.fill_with_book:
+        shown = fill_gaps(plan["views"], cameras, sound_end,
+                          keep_empty=[e for e in edits if e["to"] == "talk"])
+        plan["filled"] = sum(v["t1"] - v["t0"] for v in shown) - sum(v["t1"] - v["t0"] for v in plan["views"])
+    tl = Timeline(args.audio.stem, fps)
     tl.add_audio(timeline_audio, 0.0, sound_end, 0.0, sound_end)
     for c in cameras:
         tl.add_video(1, Path(c["path"]), c["t0"], c["t1"], src_in=c["in"], src_duration=c["duration"],
                      has_audio=c.get("has_audio", False))
-    for v in plan["views"]:
+    for v in shown:
         tl.add_video(2, Path(v["file"]), v["t0"], v["t1"], still=True)
     tl.write_fcp7_xml(res / "timeline.xml")
     plan["warnings"] = checks(plan, args, text, asr.get("repaired_gaps", 0))
@@ -358,6 +366,8 @@ def run() -> None:
     read = [s for s in plan["segments"] if s["kind"] == "read"]
     lines = [f"reading {sum(s['t1'] - s['t0'] for s in read) / 60:.1f} min of {duration / 60:.1f} min, "
              f"{len(read)} passages, {len(plan['views'])} page views", ""]
+    if args.fill_with_book:
+        lines[1:1] = [f"the page also fills {plan['filled'] / 60:.1f} min where nothing else is on screen"]
     for s in plan["segments"]:
         if s["kind"] == "read":
             how = "" if s["by"] == "text" else "  [by voice only: check]"
@@ -376,8 +386,8 @@ def run() -> None:
 
     if not args.no_preview:
         stage(6)
-        render_preview(plan, args.audio, camera_placeholder(work / "camera_placeholder.png"),
-                       rev / "preview.mp4")
+        render_preview(shown, plan["duration"], args.audio,
+                       camera_placeholder(work / "camera_placeholder.png"), rev / "preview.mp4")
     print(f"done: {out}", file=sys.stderr)
     if args.json_progress:
         print(json.dumps({"done": True}), flush=True)

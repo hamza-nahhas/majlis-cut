@@ -456,3 +456,52 @@ def apply_edits(plan: dict, edits: list[dict], words: list[dict]) -> None:
         cursor = group[-1]["t1"]
     close(cursor, plan["duration"], "talk", [])
     plan["segments"] = segments
+
+
+def fill_gaps(views: list[dict], cameras: list[dict], duration: float, keep_empty: list[dict] = (),
+              min_alone_s: float = 2.0) -> list[dict]:
+    """Page views that also cover the places where nothing else would be on screen.
+
+    Wherever neither a camera clip nor a page is shown, the page shown last stays on
+    screen until something else takes over; before the first reading, the first page
+    read is shown. Ranges in `keep_empty` (those the reviewer sent to the camera) stay
+    empty. A gap that touches a page lengthens that page's clip. A gap with cameras on
+    both sides gets a clip of its own, but only when it lasts at least `min_alone_s`,
+    so the page does not flash up between two camera clips.
+    """
+    if not views:
+        return views
+    out = [dict(v) for v in sorted(views, key=lambda v: v["t0"])]
+    taken = sorted([(c["t0"], c["t1"]) for c in cameras] + [(v["t0"], v["t1"]) for v in out]
+                   + [(e["t0"], e["t1"]) for e in keep_empty])
+    gaps: list[tuple[float, float]] = []
+    cursor = 0.0
+    for a, b in taken:
+        if a - cursor > 0.01:
+            gaps.append((cursor, a))
+        cursor = max(cursor, b)
+    if duration - cursor > 0.01:
+        gaps.append((cursor, duration))
+
+    added: list[dict] = []
+    for a, b in gaps:
+        before = [v for v in out if v["t1"] <= a + 0.01]
+        if before:
+            last = max(before, key=lambda v: v["t1"])
+            if abs(last["t1"] - a) <= 0.01:
+                last["t1"] = b                               # the page simply stays longer
+                continue
+            if b - a < min_alone_s:
+                # Too short for the old page: the next page, if it follows, comes in early.
+                nxt = next((v for v in out if abs(v["t0"] - b) <= 0.01), None)
+                if nxt is not None:
+                    nxt["t0"] = a
+                continue
+            added.append(dict(last, t0=a, t1=b, fill=True))
+        else:
+            first = out[0]                                   # before the first reading
+            if abs(first["t0"] - b) <= 0.01:
+                first["t0"] = a
+            elif b - a >= min_alone_s:
+                added.append(dict(first, t0=a, t1=b, fill=True))
+    return sorted(out + added, key=lambda v: v["t0"])

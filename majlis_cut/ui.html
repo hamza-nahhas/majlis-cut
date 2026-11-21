@@ -194,6 +194,10 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000
     <small>تُستعمل في فجوات الكاميرا الأساسية فقط.</small>
   </div>
   <div class="field">
+    <label class="row" style="font-weight:400"><input type="checkbox" id="fill_with_book"> ملء الأماكن الفارغة بصفحة الكتاب</label>
+    <small>حيث لا كاميرا ولا قراءة، تبقى آخر صفحة ظاهرة حتى تعود القراءة، وقبل أول قراءة تظهر أول صفحة. المقاطع التي تقلبها إلى «كاميرا» في المراجعة تبقى فارغة.</small>
+  </div>
+  <div class="field">
     <button class="tile" data-pick="folder" data-for="out"><span class="ico">▤</span>
       <span class="what"><b>مجلد الدرس</b><span id="out_shown">يُقترح تلقائيًّا بجانب التسجيل</span></span>
       <span class="act">تغيير</span></button>
@@ -352,7 +356,7 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000
 const $ = id => document.getElementById(id);
 const form = { audio: "", pdf: "", out: "", cam_main: [], cam_backup: [], text_source: "turath", book_id: null, book_name: "",
                vol: "", page_offset: 0, pages: "", window: 0.55, asr: "whisper",
-               overlay_size: 1, overlay_pos: "center", background: "" };
+               overlay_size: 1, overlay_pos: "center", background: "", fill_with_book: false };
 let plan = null, pollTimer = null, saveTimer = null, pending = 0, currentOut = "", step = 0, hasResult = false;
 let asrSeen = null, shotTimer = null, offsetCheckedFor = "";
 
@@ -430,6 +434,7 @@ function paint() {
     Math.abs(form.window - 0.55) < 0.03 ? "نصف صفحة تقريبًا" : Math.round(form.window * 100) + "% من الصفحة";
   $("overlay_size").value = form.overlay_size;
   $("overlay_pos").value = form.overlay_pos;
+  $("fill_with_book").checked = !!form.fill_with_book;
   $("overlaySizeLabel").textContent = Math.round(form.overlay_size * 100) + "% من ارتفاع الإطار";
   for (const r of document.querySelectorAll("input[name=asr]")) r.checked = r.value === form.asr;
   $("elevenlabs_key").classList.toggle("hidden", form.asr !== "elevenlabs");
@@ -459,6 +464,7 @@ $("page_offset").addEventListener("change", e => { form.page_offset = parseInt(e
 $("window").addEventListener("input", e => { form.window = parseFloat(e.target.value); paint(); save(); refreshShot(); });
 $("overlay_size").addEventListener("input", e => { form.overlay_size = parseFloat(e.target.value); paint(); save(); refreshShot(); });
 $("overlay_pos").addEventListener("change", e => { form.overlay_pos = e.target.value; save(); refreshShot(); });
+$("fill_with_book").addEventListener("change", e => { form.fill_with_book = e.target.checked; save(); });
 $("clearBackground").addEventListener("click", () => { form.background = ""; paint(); save(); refreshShot(); });
 for (const r of document.querySelectorAll("input[name=text_source]")) {
   r.addEventListener("change", () => {
@@ -604,6 +610,7 @@ function paintSummary() {
     ["ملف الـPDF", baseName(form.pdf) + (fromPdf() ? "" : "، فرق الترقيم " + (form.page_offset || 0))],
     ["الكاميرات", (form.cam_main.length || form.cam_backup.length)
       ? form.cam_main.length + " أساسية، " + form.cam_backup.length + " احتياط" : "لا مقاطع"],
+    ["الأماكن الفارغة", form.fill_with_book ? "تملؤها صفحة الكتاب" : "تبقى فارغة"],
     ["مجلد الدرس", form.out]];
   $("summary").replaceChildren(...rows.flatMap(([k, v]) => {
     const dt = document.createElement("dt"); dt.textContent = k;
