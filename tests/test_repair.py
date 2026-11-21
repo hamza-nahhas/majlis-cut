@@ -11,7 +11,7 @@ import numpy as np
 from faster_whisper import WhisperModel
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from darsmontage.asr import repair_gaps  # noqa: E402
+from majlis_cut.asr import repair_gaps  # noqa: E402
 
 audio, cached = sys.argv[1], Path(sys.argv[2])
 words = [w for w in json.loads(cached.read_text(encoding="utf-8"))["words"] if w["t1"] < 360]

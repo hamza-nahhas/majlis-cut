@@ -1,6 +1,6 @@
 """Correct a segment through the interface server and apply it: python tests/try_ui_edit.py <port>
 
-The server must run with DARSMONTAGE_STATE pointing at a test state file.
+The server must run with MAJLIS_CUT_STATE pointing at a test state file.
 """
 import sys
 import time

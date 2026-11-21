@@ -5,7 +5,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-html = (Path(__file__).resolve().parents[1] / "darsmontage" / "ui.html").read_text(encoding="utf-8")
+html = (Path(__file__).resolve().parents[1] / "majlis_cut" / "ui.html").read_text(encoding="utf-8")
 script = re.search(r"<script>(.*)</script>", html, re.S).group(1)
 ids_used = set(re.findall(r'\$\("([\w]+)"\)', script))
 ids_defined = set(re.findall(r'id="([\w]+)"', html))

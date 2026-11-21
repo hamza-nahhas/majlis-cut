@@ -9,9 +9,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from darsmontage.arabic import tokens
-from darsmontage.book import load_turath_pages
-from darsmontage.ocr import ocr_pages
+from majlis_cut.arabic import tokens
+from majlis_cut.book import load_turath_pages
+from majlis_cut.ocr import ocr_pages
 
 pdf, book_id, vol, first, last = Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
 offset = int(sys.argv[6]) if len(sys.argv) > 6 else 0

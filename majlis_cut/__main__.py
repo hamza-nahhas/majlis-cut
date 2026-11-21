@@ -1,8 +1,8 @@
-"""darsmontage: from a lesson recording and the book PDF to a ready timeline.
+"""majlis_cut: from a lesson recording and the book PDF to a ready timeline.
 
-    python -m darsmontage --audio lesson.mp3 --pdf book.pdf --turath 197 --vol 3 --out out_dir
+    python -m majlis_cut --audio lesson.mp3 --pdf book.pdf --turath 197 --vol 3 --out out_dir
 
-For the graphical interface run:  python -m darsmontage.ui
+For the graphical interface run:  python -m majlis_cut.ui
 """
 from __future__ import annotations
 
@@ -179,7 +179,7 @@ def main() -> None:
 
 
 def run() -> None:
-    ap = argparse.ArgumentParser(prog="darsmontage", description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(prog="majlis-cut", description=__doc__.splitlines()[0])
     ap.add_argument("--audio", required=True, type=Path, help="master audio recording of the lesson")
     ap.add_argument("--pdf", required=True, type=Path, help="the book PDF shown on screen")
     ap.add_argument("--out", required=True, type=Path, help="output folder for this lesson")

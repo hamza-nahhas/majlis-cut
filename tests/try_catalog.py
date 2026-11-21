@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from darsmontage.book import guess_page_offset, load_turath_pages, turath_catalog, turath_volumes  # noqa: E402
+from majlis_cut.book import guess_page_offset, load_turath_pages, turath_catalog, turath_volumes  # noqa: E402
 
 pdf, cache = Path(sys.argv[1]), Path(sys.argv[2]) / "books"
 cat = turath_catalog(cache)

@@ -97,7 +97,7 @@
 
 ```powershell
 cd D:\majalis_pro_editor
-.venv\Scripts\python.exe -m darsmontage `
+.venv\Scripts\python.exe -m majlis_cut `
   --audio "D:\lesson\lesson02.mp3" `
   --pdf "D:\lesson\book_vol3.pdf" `
   --turath 197 --vol 3 `

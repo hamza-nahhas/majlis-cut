@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from darsmontage.sync import camera_track, place_all  # noqa: E402
+from majlis_cut.sync import camera_track, place_all  # noqa: E402
 
 master, work = Path(sys.argv[1]), Path(sys.argv[2]) / "fake_cams"
 work.mkdir(parents=True, exist_ok=True)

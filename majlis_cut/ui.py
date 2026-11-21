@@ -1,6 +1,6 @@
 """Graphical interface: a local web page served from this machine only.
 
-    python -m darsmontage.ui        (or double-click start.bat)
+    python -m majlis_cut.ui        (or double-click start.bat)
 
 The page collects the lesson's files, runs the same command-line tool in a
 separate process and shows its progress and its result.
@@ -31,7 +31,7 @@ from .book import (build_book, guess_page_offset, load_turath_pages, read_pdf_te
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "cache"
-STATE_FILE = Path(os.environ.get("DARSMONTAGE_STATE") or ROOT / "ui_state.json")   # tests use their own
+STATE_FILE = Path(os.environ.get("MAJLIS_CUT_STATE") or ROOT / "ui_state.json")   # tests use their own
 PAGE = Path(__file__).with_name("ui.html")
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -82,7 +82,7 @@ class Job:
                 "has_cameras": self.has_cameras, "stages": STAGES, "log": list(self.log)[-12:]}
 
     def start(self, cfg: dict) -> None:
-        cmd = [sys.executable, "-m", "darsmontage", "--json-progress",
+        cmd = [sys.executable, "-m", "majlis_cut", "--json-progress",
                "--audio", cfg["audio"], "--pdf", cfg["pdf"], "--out", cfg["out"],
                "--window", str(float(cfg.get("window") or 0.55)),
                "--overlay-size", str(float(cfg.get("overlay_size") or 1.0)),
@@ -275,7 +275,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "no such page"}, 404)
                     return
                 background = Path(q["background"]) if q.get("background") else None
-                tmp = Path(tempfile.mkdtemp(prefix="darsmontage_"))
+                tmp = Path(tempfile.mkdtemp(prefix="majlis_cut_"))
                 try:
                     shot = render_view(book, idx, 0, tmp, scale=float(q.get("size", 1)),
                                        pos=q.get("pos", "center"), background=background)
@@ -384,7 +384,7 @@ def main() -> None:
         except OSError:
             port += 1
     url = f"http://127.0.0.1:{port}/"
-    print(f"darsmontage: {url}   (close this window to stop)")
+    print(f"majlis_cut: {url}   (close this window to stop)")
     if "--no-browser" not in sys.argv:
         webbrowser.open(url)
     try:

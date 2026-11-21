@@ -1,4 +1,4 @@
-# darsmontage: مونتاج أولي آلي لدروس قراءة الكتب
+# majlis-cut: مونتاج أولي آلي لدروس قراءة الكتب
 
 في دروس القراءة والتعليق يقرأ القارئ من الكتاب ويعلّق الشيخ، والفيديو النهائي يعرض **صفحة الكتاب حين يقرأ القارئ** و**الكاميرا حين يعلّق الشيخ**. هذه الأداة تصنع هذا التبديل آليًّا: تأخذ تسجيل الدرس وملف الكتاب، وتُخرج خطًّا زمنيًّا قابلًا للتعديل يُفتح في DaVinci Resolve (النسخة المجانية).
 
@@ -23,8 +23,8 @@
 يلزم ويندوز 10 أو 11، و Python 3.11 أو أحدث، و ffmpeg. التفاصيل في [دليل التثبيت](docs/INSTALL.md).
 
 ```powershell
-git clone https://github.com/hamza-nahhas/majalis_pro_editor.git
-cd majalis_pro_editor
+git clone https://github.com/hamza-nahhas/majlis-cut.git
+cd majlis-cut
 .\setup.bat     # مرة واحدة
 .\start.bat     # في كل مرة
 ```

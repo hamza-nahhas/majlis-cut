@@ -36,8 +36,8 @@ ffmpeg -version
 ### 3. الأداة
 
 ```powershell
-git clone https://github.com/hamza-nahhas/majalis_pro_editor.git
-cd majalis_pro_editor
+git clone https://github.com/hamza-nahhas/majlis-cut.git
+cd majlis-cut
 ```
 
 أو نزّل المستودع ملفًّا مضغوطًا من صفحة GitHub وفكّه. يُفضَّل مسار قصير بلا حروف عربية، مثل `D:\majalis_pro_editor`.

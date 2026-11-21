@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from darsmontage.book import build_book, load_turath_pages, render_view, view_stops  # noqa: E402
+from majlis_cut.book import build_book, load_turath_pages, render_view, view_stops  # noqa: E402
 
 pdf, work = Path(sys.argv[1]), Path(sys.argv[2])
 text = load_turath_pages(197, "3", work / "books")

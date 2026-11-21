@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from darsmontage.voice import VoiceModel, load_audio  # noqa: E402
+from majlis_cut.voice import VoiceModel, load_audio  # noqa: E402
 
 audio, out = Path(sys.argv[1]), Path(sys.argv[2])
 plan = json.loads((out / "plan.json").read_text(encoding="utf-8"))

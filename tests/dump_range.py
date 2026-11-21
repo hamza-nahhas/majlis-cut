@@ -4,8 +4,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from darsmontage.align import align  # noqa: E402
-from darsmontage.book import build_book, load_turath_pages  # noqa: E402
+from majlis_cut.align import align  # noqa: E402
+from majlis_cut.book import build_book, load_turath_pages  # noqa: E402
 
 pdf, work, src = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
 a, b = float(sys.argv[4]), float(sys.argv[5])
