@@ -125,6 +125,6 @@ tests\          سكربتات تجربة يدوية
 لتجربة الواجهة دون المساس بنسخة العمل، شغّل خادمًا ثانيًا بمنفذ وملف حالة مستقلين:
 
 ```powershell
-$env:MAJLIS_CUT_STATE = "D:\majalis_pro_editor\work\t1\state.json"
+$env:MAJLIS_CUT_STATE = "D:\majlis-cut\work\t1\state.json"
 .venv\Scripts\python.exe -m majlis_cut.ui --port 8790 --no-browser
 ```

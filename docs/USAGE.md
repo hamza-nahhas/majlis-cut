@@ -96,7 +96,7 @@
 ## سطر الأوامر
 
 ```powershell
-cd D:\majalis_pro_editor
+cd D:\majlis-cut
 .venv\Scripts\python.exe -m majlis_cut `
   --audio "D:\lesson\lesson02.mp3" `
   --pdf "D:\lesson\book_vol3.pdf" `
