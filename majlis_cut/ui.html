@@ -147,6 +147,13 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000
 .cams { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
 .cams th, .cams td { text-align: start; padding: 5px 8px; border-bottom: 1px solid var(--line); }
 .cams td.name { direction: ltr; text-align: left; }
+.update { max-width: 1120px; margin: 16px auto 0; padding: 0 24px; }
+.update .in { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; background: var(--accent-soft);
+  border: 1px solid var(--accent); border-radius: 12px; padding: 10px 16px; }
+.update .msg { flex: 1; min-width: 220px; }
+.update .msg.bad { color: var(--bad); }
+.update pre { flex-basis: 100%; margin: 0; white-space: pre-wrap; font: inherit; font-size: 14px;
+  max-height: 260px; overflow: auto; border-top: 1px solid var(--line); padding-top: 8px; }
 .hidden { display: none !important; }
 @media (max-width: 820px) {
   .top .in { flex-direction: column; align-items: stretch; gap: 8px; }
@@ -165,6 +172,13 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000
     <li data-step="3"><span class="n">4</span><span class="t">التشغيل</span></li>
     <li data-step="4"><span class="n">5</span><span class="t">المراجعة</span></li>
   </ol>
+</div></div>
+<div class="update hidden" id="update"><div class="in">
+  <span class="msg" id="update-msg"></span>
+  <button class="ghost" id="update-notes-btn">ما الجديد</button>
+  <button class="primary" id="update-go">حدِّث الآن</button>
+  <button class="ghost" id="update-later">لاحقًا</button>
+  <pre class="hidden" id="update-notes"></pre>
 </div></div>
 <main>
 
@@ -773,7 +787,53 @@ $("video").addEventListener("timeupdate", () => {
   if (li) { li.classList.add("on"); li.scrollIntoView({ block: "nearest" }); }
 });
 
+/* ---------- updates ---------- */
+let updateInfo = null;
+function updateMsg(text, bad) {
+  $("update-msg").textContent = text; $("update-msg").classList.toggle("bad", !!bad);
+}
+async function checkUpdate() {
+  try { updateInfo = await api("/api/version?check=1"); } catch { return; }
+  document.querySelector(".brand small").textContent += " · " + updateInfo.current;
+  let later = "";
+  try { later = localStorage.getItem("update-later") || ""; } catch {}
+  if (!updateInfo.available || later === updateInfo.latest) return;
+  updateMsg(`إصدار جديد متاح: ${updateInfo.latest} (عندك ${updateInfo.current}).`);
+  $("update-notes").textContent = updateInfo.notes || "لا توجد ملاحظات لهذا الإصدار.";
+  $("update").classList.remove("hidden");
+}
+$("update-notes-btn").addEventListener("click", () => $("update-notes").classList.toggle("hidden"));
+$("update-later").addEventListener("click", () => {
+  try { localStorage.setItem("update-later", updateInfo.latest); } catch {}
+  $("update").classList.add("hidden");
+});
+$("update-go").addEventListener("click", async () => {
+  for (const b of ["update-go", "update-later", "update-notes-btn"]) $(b).disabled = true;
+  updateMsg("جارٍ تنزيل الإصدار الجديد وتثبيته...");
+  try {
+    await api("/api/update", {});
+  } catch (e) {
+    updateMsg("تعذّر التحديث: " + e.message, true);
+    for (const b of ["update-go", "update-later", "update-notes-btn"]) $(b).disabled = false;
+    return;
+  }
+  updateMsg("ثُبِّت الإصدار الجديد. تُفتح الواجهة من جديد بعد لحظات؛ إن تغيّرت المكتبات فقد يستغرق تثبيتها دقائق في النافذة السوداء.");
+  const started = Date.now();
+  const wait = setInterval(async () => {
+    try {
+      const v = await api("/api/version");
+      if (v.current === updateInfo.latest) { clearInterval(wait); location.reload(); }
+    } catch {
+      if (Date.now() - started > 20 * 60 * 1000) {
+        clearInterval(wait);
+        updateMsg("لم تُفتح الواجهة بعد. انظر النافذة السوداء، أو شغّل start.bat من جديد.", true);
+      }
+    }
+  }, 2000);
+});
+
 /* ---------- start ---------- */
+checkUpdate();
 (async () => {
   const state = await api("/api/state");
   Object.assign(form, state.form || {});

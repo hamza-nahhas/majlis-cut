@@ -1,15 +1,19 @@
-numpy
-scipy
-rapidfuzz
-pymupdf
-pillow
-requests
-faster-whisper
+# Tested with the versions in the comments (Python 3.13). The upper bounds keep an
+# update from pulling in a new major version that changes behaviour. A change to
+# this file makes start.bat reinstall the libraries on the next start.
+numpy>=1.26,<3           # 2.5.4
+scipy>=1.11,<2           # 1.18.1
+rapidfuzz>=3.0,<4        # 3.14.6
+pymupdf>=1.24,<1.27      # 1.25.5
+pillow>=10.0,<12         # 11.3.0
+requests>=2.31,<3        # 2.32.3
+faster-whisper>=1.1,<2   # 1.2.1
 # reading the text off scanned pages with the reader built into Windows
-winrt-runtime
-winrt-Windows.Foundation
-winrt-Windows.Foundation.Collections
-winrt-Windows.Globalization
-winrt-Windows.Graphics.Imaging
-winrt-Windows.Media.Ocr
-winrt-Windows.Storage.Streams
+winrt-runtime>=4,<5                         # 4.2.0
+# these carry a version epoch ("4!"): 4!10 is the series that goes with winrt-runtime 4
+winrt-Windows.Foundation>=4!10,<5!0          # 4!10.0.28000.2957
+winrt-Windows.Foundation.Collections>=4!10,<5!0
+winrt-Windows.Globalization>=4!10,<5!0
+winrt-Windows.Graphics.Imaging>=4!10,<5!0
+winrt-Windows.Media.Ocr>=4!10,<5!0
+winrt-Windows.Storage.Streams>=4!10,<5!0

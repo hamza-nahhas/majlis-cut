@@ -1,1 +1,6 @@
 *.bat -text
+# left out of the release zip (git archive)
+tests/ export-ignore
+.github/ export-ignore
+.gitattributes export-ignore
+.gitignore export-ignore

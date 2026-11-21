@@ -22,12 +22,11 @@
 
 يلزم ويندوز 10 أو 11، و Python 3.11 أو أحدث، و ffmpeg. التفاصيل في [دليل التثبيت](docs/INSTALL.md).
 
-```powershell
-git clone https://github.com/hamza-nahhas/majlis-cut.git
-cd majlis-cut
-.\setup.bat     # مرة واحدة
-.\start.bat     # في كل مرة
-```
+1. نزّل `majlis-cut-vX.Y.Z.zip` من [صفحة الإصدارات](https://github.com/hamza-nahhas/majlis-cut/releases/latest) وفكّه.
+2. انقر مرتين على `setup.bat` (مرة واحدة).
+3. انقر مرتين على `start.bat` (في كل مرة).
+
+الأداة تتحدّث من واجهتها: حين يصدر إصدار جديد يظهر شريط في أعلاها، ونقرة واحدة تثبّته. التفاصيل في [التثبيت](docs/INSTALL.md#التحديث).
 
 ثم في الواجهة:
 
@@ -42,6 +41,7 @@ cd majlis-cut
 | | |
 |---|---|
 | [التثبيت](docs/INSTALL.md) | المتطلبات وخطوات التثبيت على جهاز جديد والتحديث |
+| [سجل التغييرات](CHANGELOG.md) | ما الجديد في كل إصدار |
 | [دليل الاستعمال](docs/USAGE.md) | الخطوات بالتفصيل، التصحيح، الاستيراد في Resolve، سطر الأوامر |
 | [كيف تعمل](docs/HOW_IT_WORKS.md) | المراحل والخوارزميات وبنية الشيفرة وصيغ الملفات |
 | [حل المشكلات](docs/TROUBLESHOOTING.md) | الملاحظات ومعانيها، وأعطال التشغيل و Resolve |

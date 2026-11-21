@@ -1,6 +1,6 @@
 @echo off
 rem One-time setup on a new computer: makes the tool's own Python environment and
-rem installs its libraries into it. Run again after an update to refresh them.
+rem installs its libraries into it. start.bat refreshes them by itself after an update.
 cd /d "%~dp0"
 set PYTHONUTF8=1
 
@@ -22,9 +22,7 @@ if not exist ".venv\Scripts\python.exe" (
   py -3 -m venv .venv
   if errorlevel 1 ( echo Could not create the environment. & pause & exit /b 1 )
 )
-echo Installing libraries (several minutes the first time)...
-".venv\Scripts\python.exe" -m pip install --upgrade pip --quiet
-".venv\Scripts\python.exe" -m pip install -r requirements.txt
+".venv\Scripts\python.exe" -m majlis_cut.deps --force
 if errorlevel 1 ( echo Installing the libraries failed. Check the internet connection and run setup.bat again. & pause & exit /b 1 )
 
 echo.

@@ -1,0 +1,40 @@
+# Push a tag like v0.4.0 to publish a release: it checks that the tag matches
+# majlis_cut/__init__.py, runs the self-contained tests, builds majlis-cut-v0.4.0.zip and
+# publishes it with the CHANGELOG.md section as the notes. The interface finds
+# the release through GitHub's "latest release", so drafts and pre-releases are
+# not offered to users.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Tag matches the version in the code
+        run: |
+          code=$(python -c "import majlis_cut; print(majlis_cut.__version__)")
+          test "v$code" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME but code says $code"; exit 1; }
+      - name: Quick tests
+        run: |
+          pip install -r requirements.txt
+          python tests/test_fill.py
+          python tests/test_update.py
+      - name: Build the zip
+        run: |
+          name="majlis-cut-$GITHUB_REF_NAME"
+          git archive --format=zip --prefix=majlis-cut/ -o "$name.zip" "$GITHUB_REF_NAME"
+          python tools/release_notes.py "$GITHUB_REF_NAME" > notes.md
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "majlis-cut-$GITHUB_REF_NAME.zip" --title "$GITHUB_REF_NAME" --notes-file notes.md

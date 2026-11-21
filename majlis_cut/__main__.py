@@ -13,11 +13,11 @@ import shutil
 import sys
 from pathlib import Path
 
+from . import __version__ as VERSION
 from .align import align, apply_edits, build_plan, fill_gaps
 from .asr import audio_duration, stamp, transcribe
 from .book import build_book, guess_page_offset, load_turath_pages, read_pdf_text, render_view
 
-VERSION = "0.3"
 VIEW_VERSION = 1     # raise when the way page pictures are drawn changes
 from .export import Timeline, camera_placeholder, render_preview
 from .sync import camera_track, place_all, probe_video, save

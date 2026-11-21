@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, urlparse
 
 import fitz
 
+from . import __version__, update
 from .__main__ import STAGES
 from .arabic import normalize
 from .book import (build_book, guess_page_offset, load_turath_pages, read_pdf_text, render_view,
@@ -240,6 +241,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._bytes(PAGE.read_bytes(), "text/html; charset=utf-8")
             elif url.path == "/api/state":
                 self._json({"form": load_state(), "job": JOB.status()})
+            elif url.path == "/api/version":
+                self._json(update.check(force=q.get("force") == "1") if q.get("check") else
+                           {"current": __version__})
             elif url.path == "/api/status":
                 self._json(JOB.status())
             elif url.path == "/api/books":
@@ -351,6 +355,13 @@ class Handler(BaseHTTPRequestHandler):
                     edits.append({"t0": body["t0"], "t1": body["t1"], "to": body["to"]})
                 path.write_text(json.dumps(edits), encoding="utf-8")
                 self._json({"count": len(edits)})
+            elif url.path == "/api/update":
+                if JOB.state == "running":
+                    self._json({"error": "انتظر حتى ينتهي التشغيل الجاري ثم حدّث."}, 409)
+                    return
+                update.apply(self.server.server_address[1])
+                self._json({"ok": True})
+                restart_after_update(self.server)
             elif url.path == "/api/cancel":
                 JOB.cancel()
                 self._json({"ok": True})
@@ -377,8 +388,20 @@ class Server(ThreadingHTTPServer):
         super().server_bind()
 
 
+RESTARTING = threading.Event()
+
+
+def restart_after_update(server: Server) -> None:
+    """Close the interface so start.bat opens the new version (see update.py)."""
+    RESTARTING.set()
+    threading.Thread(target=server.shutdown, daemon=True).start()
+
+
 def main() -> None:
     port = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 8765
+    again = update.restart_port()            # reopening after an update: same page, same port
+    if again:
+        port = again
     while True:
         try:
             server = Server(("127.0.0.1", port), Handler)
@@ -386,13 +409,17 @@ def main() -> None:
         except OSError:
             port += 1
     url = f"http://127.0.0.1:{port}/"
-    print(f"majlis_cut: {url}   (close this window to stop)")
-    if "--no-browser" not in sys.argv:
+    print(f"majlis_cut {__version__}: {url}   (close this window to stop)")
+    if "--no-browser" not in sys.argv and port != again:   # the old page reloads itself
         webbrowser.open(url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         JOB.cancel()
+    server.server_close()
+    if RESTARTING.is_set():
+        print("Updated. Opening the new version...")
+        sys.exit(update.RESTART_CODE)
 
 
 if __name__ == "__main__":
