@@ -260,19 +260,11 @@ def _preview_frames(shots: list[tuple[Path, float]], highlights: list[dict], aud
             if h is None:
                 proc.stdin.write(base.data)
                 continue
-            a, area = h["hl"].alpha_area(t - h["t0"])
-            if area is None:
-                proc.stdin.write(base.data)
-                continue
-            x0, y0, x1, y1 = area
-            frame = base.copy()
-            region = frame[y0:y1, x0:x1].astype(np.float32)
-            cover = a[y0:y1, x0:x1, None]
-            region = region * (1 - cover) + h["hl"].color * cover
-            top = ink(Path(h["ink"]))[y0:y1, x0:x1]
-            region = region * (1 - top[..., 3:]) + top[..., :3] * 255 * top[..., 3:]
-            frame[y0:y1, x0:x1] = region.astype(np.uint8)
-            proc.stdin.write(frame.data)
+            if not h.get("bound"):
+                h["hl"].bind(base, ink(Path(h["ink"])) if h.get("ink") else None)
+                h["bound"] = True
+            frame = h["hl"].apply(base, t - h["t0"])
+            proc.stdin.write((base if frame is None else frame).data)
         proc.stdin.close()
     except BrokenPipeError:
         pass

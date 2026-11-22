@@ -296,8 +296,20 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000
       </div>
       <div class="field">
         <label class="row"><input type="checkbox" id="highlight"> تحديد الكلمة المقروءة وسطرها</label>
-        <label class="row hidden" id="highlightColorRow" style="font-weight:400;margin-top:6px">
-          <input type="color" id="highlight_color" value="#4096ff" style="width:44px;height:30px;padding:0;border:0;background:none"> لون التحديد</label>
+        <div id="highlightOptions" class="hidden" style="margin-top:6px">
+          <div class="row" style="gap:14px;flex-wrap:wrap">
+            <label class="row" style="font-weight:400"><input type="radio" name="highlight_style" value="ribbon"> شريط</label>
+            <label class="row" style="font-weight:400"><input type="radio" name="highlight_style" value="glass"> زجاج</label>
+            <label class="row" style="font-weight:400"><input type="radio" name="highlight_style" value="glass-tail"> زجاج بذيل</label>
+          </div>
+          <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;align-items:center">
+            <input type="color" id="highlight_color" value="#4096ff" title="لون التحديد"
+                   style="width:44px;height:30px;padding:0;border:0;background:none">
+            <span id="colorPresets" class="row" style="gap:6px;flex-wrap:wrap"></span>
+            <button class="ghost" id="saveColor" type="button">حفظ اللون</button>
+          </div>
+          <small id="styleHint"></small>
+        </div>
         <small>شريط ملوّن ينساب تحت الكلمات مع القارئ، وضوء خافت على السطر. يوضع في Resolve على المسار V3 تحت حبر الصفحة (V4)، فيمكن إطفاؤه من هناك. تغيير اللون وحده يعيد رسم التحديد فقط.</small>
       </div>
       <div class="field">
@@ -384,7 +396,8 @@ const $ = id => document.getElementById(id);
 const form = { audio: "", pdf: "", out: "", cam_main: [], cam_backup: [], text_source: "turath", book_id: null, book_name: "",
                vol: "", page_offset: 0, pages: "", window: 0.55, asr: "whisper",
                overlay_size: 1, overlay_pos: "center", background: "", fill_with_book: false, no_paper: false,
-               highlight: false, highlight_color: "#4096ff" };
+               highlight: false, highlight_color: "#4096ff", highlight_style: "ribbon",
+               color_presets: ["#4096ff"] };
 let plan = null, pollTimer = null, saveTimer = null, pending = 0, currentOut = "", step = 0, hasResult = false;
 let asrSeen = null, shotTimer = null, offsetCheckedFor = "";
 
@@ -466,7 +479,13 @@ function paint() {
   $("no_paper").checked = !!form.no_paper;
   $("highlight").checked = !!form.highlight;
   $("highlight_color").value = form.highlight_color || "#4096ff";
-  $("highlightColorRow").classList.toggle("hidden", !form.highlight);
+  $("highlightOptions").classList.toggle("hidden", !form.highlight);
+  for (const r of document.querySelectorAll("input[name=highlight_style]")) r.checked = r.value === (form.highlight_style || "ribbon");
+  $("styleHint").textContent = (form.highlight_style || "ribbon") === "ribbon"
+    ? "شريط ملوّن ينساب تحت الكلمات مع القارئ، وضوء خافت على السطر. خفيف وسريع."
+    : "لوح زجاج ينساب مع القارئ ويثني الحروف عند حافته قليلًا" + (form.highlight_style === "glass-tail" ? "، ويذوب خلف الكلمة كذيل" : "")
+      + ". أبطأ في التشغيل وأكبر حجمًا من الشريط (نحو عشر دقائق وأربعة غيغابايت لدرس فيه ٣٦ دقيقة قراءة).";
+  paintPresets();
   $("overlaySizeLabel").textContent = Math.round(form.overlay_size * 100) + "% من ارتفاع الإطار";
   for (const r of document.querySelectorAll("input[name=asr]")) r.checked = r.value === form.asr;
   $("elevenlabs_key").classList.toggle("hidden", form.asr !== "elevenlabs");
@@ -499,7 +518,35 @@ $("overlay_pos").addEventListener("change", e => { form.overlay_pos = e.target.v
 $("fill_with_book").addEventListener("change", e => { form.fill_with_book = e.target.checked; save(); });
 $("no_paper").addEventListener("change", e => { form.no_paper = e.target.checked; save(); refreshShot(); });
 $("highlight").addEventListener("change", e => { form.highlight = e.target.checked; paint(); save(); refreshShot(); });
-$("highlight_color").addEventListener("input", e => { form.highlight_color = e.target.value; save(); refreshShot(); });
+$("highlight_color").addEventListener("input", e => { form.highlight_color = e.target.value; paintPresets(); save(); refreshShot(); });
+for (const r of document.querySelectorAll("input[name=highlight_style]")) {
+  r.addEventListener("change", () => { form.highlight_style = r.value; paint(); save(); refreshShot(); });
+}
+/* saved colours: one click picks a colour, the small cross forgets it */
+function paintPresets() {
+  const presets = form.color_presets || [];
+  $("colorPresets").replaceChildren(...presets.map(c => {
+    const wrap = document.createElement("span");
+    wrap.className = "row"; wrap.style.cssText = "gap:0;align-items:flex-start";
+    const sw = document.createElement("button");
+    sw.type = "button"; sw.title = c;
+    sw.style.cssText = `width:26px;height:26px;border-radius:6px;padding:0;background:${c};` +
+      `border:2px solid ${c.toLowerCase() === (form.highlight_color || "").toLowerCase() ? "var(--ink)" : "var(--line)"}`;
+    sw.addEventListener("click", () => { form.highlight_color = c; $("highlight_color").value = c; paintPresets(); save(); refreshShot(); });
+    const x = document.createElement("button");
+    x.type = "button"; x.textContent = "×"; x.title = "نسيان هذا اللون";
+    x.style.cssText = "border:0;background:none;padding:0 2px;font-size:13px;line-height:1;color:var(--muted);cursor:pointer";
+    x.addEventListener("click", () => { form.color_presets = presets.filter(p => p !== c); paintPresets(); save(); });
+    wrap.append(sw, x);
+    return wrap;
+  }));
+  $("saveColor").disabled = presets.map(p => p.toLowerCase()).includes((form.highlight_color || "").toLowerCase());
+}
+$("saveColor").addEventListener("click", () => {
+  const c = form.highlight_color;
+  form.color_presets = [...(form.color_presets || []).filter(p => p.toLowerCase() !== c.toLowerCase()), c];
+  paintPresets(); save();
+});
 $("clearBackground").addEventListener("click", () => { form.background = ""; paint(); save(); refreshShot(); });
 for (const r of document.querySelectorAll("input[name=text_source]")) {
   r.addEventListener("change", () => {
@@ -636,7 +683,7 @@ function refreshShot() {
     img.src = "/api/sample?" + new URLSearchParams({ pdf: form.pdf, id: fromPdf() ? "" : form.book_id, vol: form.vol, page,
       offset: offsetNow(), window: form.window, size: form.overlay_size, pos: form.overlay_pos,
       background: form.background || "", paper: form.no_paper ? "0" : "1",
-      hl: form.highlight ? form.highlight_color : "", v: Date.now() });
+      hl: form.highlight ? form.highlight_color : "", style: form.highlight_style || "ribbon", v: Date.now() });
   }, 300);
 }
 
@@ -648,7 +695,8 @@ function paintSummary() {
       ? form.cam_main.length + " أساسية، " + form.cam_backup.length + " احتياط" : "لا مقاطع"],
     ["الأماكن الفارغة", form.fill_with_book ? "تملؤها صفحة الكتاب" : "تبقى فارغة"],
     ["ورق الصفحة", form.no_paper ? "مُزال: النص وحده" : "ظاهر"],
-    ["تحديد القراءة", form.highlight ? "الكلمة وسطرها، باللون " + form.highlight_color : "بلا تحديد"],
+    ["تحديد القراءة", form.highlight ? ({ ribbon: "شريط", glass: "زجاج", "glass-tail": "زجاج بذيل" }[form.highlight_style || "ribbon"])
+      + "، باللون " + form.highlight_color : "بلا تحديد"],
     ["مجلد الدرس", form.out]];
   $("summary").replaceChildren(...rows.flatMap(([k, v]) => {
     const dt = document.createElement("dt"); dt.textContent = k;

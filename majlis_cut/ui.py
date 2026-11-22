@@ -28,7 +28,7 @@ from .__main__ import STAGES
 from .arabic import normalize
 from .book import (build_book, guess_page_offset, load_turath_pages, ocr_cache, read_pdf_text,
                    render_view, turath_catalog, turath_volumes, view_frame)
-from .highlight import DEFAULT_COLOR, parse_color
+from .highlight import DEFAULT_COLOR, STYLES, parse_color
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "cache"
@@ -66,7 +66,7 @@ def page_as_read(pdf: Path, page: int) -> str:
     return "\n".join(" ".join(ws) for ws in lines.values())
 
 
-def sample_highlight(book, idx: int, shot: Path, tmp: Path, color, look: dict) -> Path:
+def sample_highlight(book, idx: int, shot: Path, tmp: Path, color, look: dict, style: str = "ribbon") -> Path:
     """The sample page with the reading highlight resting on one of its words."""
     import numpy as np
     from PIL import Image
@@ -77,12 +77,15 @@ def sample_highlight(book, idx: int, shot: Path, tmp: Path, color, look: dict) -
     words = [] if available() else ocr_pages(book.pdf_path, [idx], ocr_cache(book.pdf_path, CACHE),
                                              boxes=True)[idx]
     frame = view_frame(book, idx, 0, scale=look["scale"], pos=look["pos"])
-    hl = sample(book, idx, 0, frame, words, color)
-    if hl is None:
-        return shot
     page = Image.open(shot).convert("RGBA")
     ink = Image.open(render_view(book, idx, 0, tmp, ink_only=True, **look)).convert("RGBA")
-    out = Image.alpha_composite(Image.alpha_composite(page, Image.fromarray(np.ascontiguousarray(hl))), ink)
+    got = sample(book, idx, 0, frame, words, color, np.asarray(page, np.float32),
+                 np.asarray(ink, np.float32) / 255, style)
+    if got is None:
+        return shot
+    out = Image.fromarray(got)
+    if style == "ribbon" and page.getextrema()[3][0] < 255:
+        out.putalpha(page.getchannel("A"))       # keep the see-through ground, as the page is shown
     path = tmp / "sample_highlight.png"
     out.save(path)
     return path
@@ -123,7 +126,8 @@ class Job:
         if cfg.get("no_paper"):
             cmd += ["--no-paper"]
         if cfg.get("highlight"):
-            cmd += ["--highlight", "--highlight-color", cfg.get("highlight_color") or DEFAULT_COLOR]
+            cmd += ["--highlight", "--highlight-color", cfg.get("highlight_color") or DEFAULT_COLOR,
+                    "--highlight-style", cfg.get("highlight_style") if cfg.get("highlight_style") in STYLES else "ribbon"]
         for flag, key in (("--cam-main", "cam_main"), ("--cam-backup", "cam_backup")):
             paths = [p for p in cfg.get(key) or [] if p]
             if paths:
@@ -315,7 +319,8 @@ class Handler(BaseHTTPRequestHandler):
                     shot = render_view(book, idx, 0, tmp, background=background,
                                        paper=q.get("paper") != "0", **look)
                     if q.get("hl"):
-                        shot = sample_highlight(book, idx, shot, tmp, parse_color(q["hl"]), look)
+                        style = q.get("style") if q.get("style") in STYLES else "ribbon"
+                        shot = sample_highlight(book, idx, shot, tmp, parse_color(q["hl"]), look, style)
                     self._bytes(shot.read_bytes(), "image/png")
                 finally:
                     shutil.rmtree(tmp, ignore_errors=True)

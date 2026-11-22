@@ -135,4 +135,44 @@ with tempfile.TemporaryDirectory() as tmp:
     assert clip.find("file/media/video/samplecharacteristics/width").text == "960"
     assert clip.find("alphatype").text == "straight"
 
+
+
+# --- the glass looks ----------------------------------------------------------------
+
+from majlis_cut.glass import Glass  # noqa: E402
+from majlis_cut.highlight import STYLES, highlight_for  # noqa: E402
+
+rng = np.random.default_rng(0)
+W_, H_ = 640, 360
+paper = np.full((H_, W_, 3), 245.0, np.float32)
+paper[150:180:4, 60:600] = 20.0                           # lines of "ink"
+ink = np.zeros((H_, W_, 4), np.float32)
+ink[150:180:4, 60:600] = (20 / 255, 20 / 255, 20 / 255, 1.0)
+gl_events = [word(0.5 + 0.4 * k, 1450 - 130 * k, line1) for k in range(5)]
+for style in ("glass", "glass-tail"):
+    g = highlight_for(style, gl_events, 4.0, (64, 150, 255), scale=W_ / 1920)
+    assert isinstance(g, Glass)
+    g.bind(paper, ink)
+    shown = np.clip(paper + 0.5, 0, 255).astype(np.uint8)
+    times = [i / 25 for i in range(100)]
+    for i, data in enumerate(g.frames(times)):
+        if i % 10:
+            continue
+        rgba = np.frombuffer(data, np.uint8).reshape(g.h, g.w, 4).astype(np.float32)
+        over = shown * (1 - rgba[..., 3:] / 255) + rgba[..., :3] * rgba[..., 3:] / 255
+        direct = g.apply(shown, times[i])
+        if direct is not None:
+            assert np.abs(over - direct).max() <= 2.0, f"{style}: the clip over the page is the glass ({i})"
+    # on a see-through page nothing is bent: the patch is a pure see-through layer
+    clear = np.dstack([paper, np.zeros((H_, W_), np.float32)])
+    g2 = highlight_for(style, gl_events, 4.0, (64, 150, 255), scale=W_ / 1920).bind(clear, ink)
+    patches = g2.patches(1.6)
+    assert patches and all(np.all(a < 1.0) for _, _, a, _ in patches), "no solid rim pixels over a clear page"
+
+# glass hanging over the frame's edge is cut there, not dropped
+edge_events = [word(0.5, 1915, line1, width=200)]
+g = highlight_for("glass", edge_events, 2.0, (64, 150, 255), scale=W_ / 1920).bind(paper, ink)
+assert any(x0 + a.shape[1] == W_ for _, x0, a, _ in g.patches(1.0)), "the pane reaches the frame edge"
+assert set(STYLES) == {"ribbon", "glass", "glass-tail"}
+
 print("highlight: all checks passed")
