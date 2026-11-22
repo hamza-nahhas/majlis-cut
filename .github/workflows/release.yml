@@ -1,6 +1,8 @@
 # Push a tag like v0.4.0 to publish a release: it checks that the tag matches
-# majlis_cut/__init__.py, runs the self-contained tests, builds majlis-cut-v0.4.0.zip and
-# publishes it with the CHANGELOG.md section as the notes. The interface finds
+# majlis_cut/__init__.py, runs the self-contained tests, builds majlis-cut-v0.4.0.zip
+# (what the in-app updater installs) and majlis-cut-setup-v0.4.0.exe (the installer
+# for new users, see tools/build_installer.ps1), and publishes both with the
+# CHANGELOG.md section as the notes. The interface finds
 # the release through GitHub's "latest release", so drafts and pre-releases are
 # not offered to users.
 name: release
@@ -35,7 +37,21 @@ jobs:
           name="majlis-cut-$GITHUB_REF_NAME"
           git archive --format=zip --prefix=majlis-cut/ -o "$name.zip" "$GITHUB_REF_NAME"
           python tools/release_notes.py "$GITHUB_REF_NAME" > notes.md
+      - uses: astral-sh/setup-uv@v6
+      - name: Inno Setup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release download is-7_1_1 -R jrsoftware/issrc --pattern "innosetup-7.1.1-x64.exe" --output is.exe
+          Start-Process -Wait .\is.exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/CURRENTUSER','/PORTABLE=1','/NORESTART',"/DIR=$env:RUNNER_TEMP\inno"
+      - name: Build the installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: ./tools/build_installer.ps1 -Iscc "$env:RUNNER_TEMP\inno\ISCC.exe"
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "majlis-cut-$GITHUB_REF_NAME.zip" --title "$GITHUB_REF_NAME" --notes-file notes.md
+        run: |
+          gh release create "$GITHUB_REF_NAME" "majlis-cut-$GITHUB_REF_NAME.zip" "build/majlis-cut-setup-$GITHUB_REF_NAME.exe" --title "$GITHUB_REF_NAME" --notes-file notes.md

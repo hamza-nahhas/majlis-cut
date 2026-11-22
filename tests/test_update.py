@@ -29,6 +29,10 @@ try:
     (root / "cache").mkdir()
     (root / "cache" / "book.json").write_text("keep\n")
     (root / "ui_state.json").write_text("keep\n")
+    (root / "python").mkdir()                       # the installer's Python and ffmpeg
+    (root / "python" / "python.exe").write_text("keep\n")
+    (root / "ffmpeg").mkdir()
+    (root / "ffmpeg" / "ffmpeg.exe").write_text("keep\n")
 
     # The release zip, as git archive makes it: everything under majlis-cut/.
     archive = tmp / "release.zip"
@@ -46,7 +50,7 @@ try:
     assert (root / "majlis_cut" / "new.py").exists()
     assert not (root / "majlis_cut" / "gone.py").exists(), "the code folder is replaced whole"
     assert (root / "start.bat").read_text() == "new\n" and (root / "requirements.txt").exists()
-    for kept in (".venv/lib.txt", "cache/book.json", "ui_state.json"):
+    for kept in (".venv/lib.txt", "cache/book.json", "ui_state.json", "python/python.exe", "ffmpeg/ffmpeg.exe"):
         assert (root / kept).read_text() == "keep\n", kept
     assert not list(root.glob("*.old-update")), "nothing left behind"
 

@@ -20,11 +20,9 @@
 
 ## البدء السريع
 
-يلزم ويندوز 10 أو 11، و Python 3.11 أو أحدث، و ffmpeg. التفاصيل في [دليل التثبيت](docs/INSTALL.md).
+يلزم ويندوز 10 أو 11 (64 بت). التفاصيل، والتثبيت اليدوي للمطورين، في [دليل التثبيت](docs/INSTALL.md).
 
-1. نزّل `majlis-cut-vX.Y.Z.zip` من [صفحة الإصدارات](https://github.com/hamza-nahhas/majlis-cut/releases/latest) وفكّه.
-2. انقر مرتين على `setup.bat` (مرة واحدة).
-3. انقر مرتين على `start.bat` (في كل مرة).
+نزّل `majlis-cut-setup-vX.Y.Z.exe` من [صفحة الإصدارات](https://github.com/hamza-nahhas/majlis-cut/releases/latest) وشغّله. فيه كل ما تحتاجه الأداة (Python والمكتبات و ffmpeg)، ثم تُفتح من اختصار «مونتاج الدروس». إن حذّرك ويندوز فاضغط More info ثم Run anyway.
 
 الأداة تتحدّث من واجهتها: حين يصدر إصدار جديد يظهر شريط في أعلاها، ونقرة واحدة تثبّته. التفاصيل في [التثبيت](docs/INSTALL.md#التحديث).
 

@@ -30,7 +30,8 @@ API = f"https://api.github.com/repos/{REPO}/releases/latest"
 ROOT = Path(__file__).resolve().parents[1]
 RESTART_CODE = 3
 RESTART_FILE = ROOT / ".restart.json"       # tells the next start which port to reuse
-KEEP = {".venv", "cache", "work", "ui_state.json", ".git", ".restart.json"}   # never replaced
+KEEP = {".venv", "python", "ffmpeg", "cache", "work", "ui_state.json", ".git", ".restart.json",
+        "unins000.exe", "unins000.dat"}   # never replaced (python, ffmpeg, unins*: the installer's)
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 CHECK_EVERY = 6 * 3600                      # seconds between asks to GitHub
 

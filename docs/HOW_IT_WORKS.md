@@ -81,7 +81,8 @@ majlis_cut\
   update.py     التحديث من إصدارات GitHub
   deps.py       تثبيت المكتبات حين يتغيّر requirements.txt
 tests\          سكربتات تجربة يدوية (test_fill و test_update و test_paper تعمل وحدها)
-tools\          release_notes.py لملاحظات الإصدار من CHANGELOG.md
+tools\          release_notes.py لملاحظات الإصدار، build_installer.ps1 لبرنامج التثبيت، make_icon.py للأيقونة
+installer\      majlis-cut.iss: نص برنامج التثبيت (Inno Setup 7)
 ```
 
 الواجهة لا تحوي منطقًا: تشغّل سطر الأوامر نفسه عمليةً فرعية (`--json-progress`) وتقرأ تقدّمه.
@@ -92,7 +93,9 @@ tools\          release_notes.py لملاحظات الإصدار من CHANGELOG.
 
 1. ارفع الرقم في `__init__.py`، وأضف قسمًا `## X.Y.Z - التاريخ` أعلى `CHANGELOG.md`.
 2. ادمج في `master`، ثم: `git tag vX.Y.Z` و `git push origin vX.Y.Z`.
-3. يتحقق `.github/workflows/release.yml` من تطابق الوسم والرقم، ويشغّل الاختبارات، ويصنع `majlis-cut-vX.Y.Z.zip` بـ`git archive` (بلا `tests` و `.github`)، وينشر الإصدار بنص القسم من `CHANGELOG.md`.
+3. يتحقق `.github/workflows/release.yml` من تطابق الوسم والرقم، ويشغّل الاختبارات، ويصنع `majlis-cut-vX.Y.Z.zip` بـ`git archive` (بلا `tests` و `.github` و `installer`)، ويبني برنامج التثبيت `majlis-cut-setup-vX.Y.Z.exe`، وينشر الاثنين بنص القسم من `CHANGELOG.md`.
+
+**برنامج التثبيت** (`tools/build_installer.ps1`، ويُبنى محليًّا بالأمر نفسه): ملفات الإصدار، ومعها `python\` وهو Python 3.13 مستقل من python-build-standalone (عبر `uv`، وفيه tkinter لنوافذ اختيار الملفات) والمكتبات مثبّتة فيه، و `ffmpeg\bin\` من بنايات BtbN (GPL لأجل libx264). `start.bat` يستعمل `python\` و `ffmpeg\bin\` إن وُجدا، ويعزل Python عن مكتبات المستخدم (`PYTHONNOUSERSITE`)، وإلا فـ`.venv` و ffmpeg النظام. المحدِّث لا يمسّ `python` ولا `ffmpeg` ولا ملفات الإزالة، فيبقى التحديث صغيرًا؛ وإن تغيّرت المكتبات ثبّتها `deps.py` في Python المحمول نفسه. وتثبيت إصدار أحدث فوق القديم يحذف `python` و `ffmpeg` و `majlis_cut` قبل نسخ الجديد كي لا تختلط المكتبات.
 
 الواجهة تقرأ «آخر إصدار» من واجهة GitHub (`/releases/latest`، فلا تُعرض المسودّات والإصدارات التجريبية)، وتقارن رقمه برقمها. عند التحديث يُنزَّل الملف ويُطابَق مع البصمة التي يحسبها GitHub (`sha256`)، ويُتأكَّد أن رقم الإصدار داخله هو المنتظر، ثم يُستبدل كل ما في جذر الملف المضغوط مكانه، ما عدا `.venv` و `cache` و `work` و `ui_state.json` و `.git`. القديم يُنقل جانبًا أولًا فيُعاد إن فشل شيء. ثم تكتب الواجهة منفذها في `.restart.json` وتخرج برمز 3، فيعيد `start.bat` تشغيلها على المنفذ نفسه بعد `python -m majlis_cut.deps`، والصفحة المفتوحة تنتظر حتى ترى الرقم الجديد فتعيد تحميل نفسها.
 
