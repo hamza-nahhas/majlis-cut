@@ -98,6 +98,8 @@ class Job:
             cmd += ["--background", cfg["background"]]
         if cfg.get("fill_with_book"):
             cmd += ["--fill-with-book"]
+        if cfg.get("no_paper"):
+            cmd += ["--no-paper"]
         for flag, key in (("--cam-main", "cam_main"), ("--cam-backup", "cam_backup")):
             paths = [p for p in cfg.get(key) or [] if p]
             if paths:
@@ -284,7 +286,8 @@ class Handler(BaseHTTPRequestHandler):
                 tmp = Path(tempfile.mkdtemp(prefix="majlis_cut_"))
                 try:
                     shot = render_view(book, idx, 0, tmp, scale=float(q.get("size", 1)),
-                                       pos=q.get("pos", "center"), background=background)
+                                       pos=q.get("pos", "center"), background=background,
+                                       paper=q.get("paper") != "0")
                     self._bytes(shot.read_bytes(), "image/png")
                 finally:
                     shutil.rmtree(tmp, ignore_errors=True)

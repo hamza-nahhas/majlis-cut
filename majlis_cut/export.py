@@ -2,6 +2,7 @@
 edition through File > Import > Timeline) and a quick low-resolution preview."""
 from __future__ import annotations
 
+import shutil
 import subprocess
 import xml.etree.ElementTree as ET
 from fractions import Fraction
@@ -105,6 +106,7 @@ class Timeline:
             file_el(ci, clip, kind)
             if kind == "video" and clip.get("still"):
                 ET.SubElement(ci, "stillframe").text = "TRUE"
+                ET.SubElement(ci, "alphatype").text = "straight"     # page pictures may be see-through
             if kind == "audio":
                 st = ET.SubElement(ci, "sourcetrack")
                 ET.SubElement(st, "mediatype").text = "audio"
@@ -156,13 +158,34 @@ def camera_placeholder(out: Path, size: tuple[int, int] = (1920, 1080)) -> Path:
 
 def render_preview(views: list[dict], duration: float, audio: Path, placeholder: Path, out: Path,
                    fps: int = 5, height: int = 720) -> Path:
-    """Low-resolution MP4 of the result: page views over reading, placeholder elsewhere."""
+    """Low-resolution MP4 of the result: page views over reading, placeholder elsewhere.
+
+    See-through page pictures are shown over the placeholder, as they would sit
+    over the camera in Resolve.
+    """
+    from PIL import Image
+
+    flat_dir = out.parent / "preview_frames"
+    flat: dict[Path, Path] = {}
+
+    def opaque(path: Path) -> Path:
+        if path not in flat:
+            img = Image.open(path)
+            if img.mode != "RGBA":
+                flat[path] = path
+            else:
+                flat_dir.mkdir(exist_ok=True)
+                under = Image.open(placeholder).convert("RGBA").resize(img.size)
+                flat[path] = flat_dir / f"{len(flat):05d}.png"
+                Image.alpha_composite(under, img).convert("RGB").save(flat[path])
+        return flat[path]
+
     shots: list[tuple[Path, float]] = []
     cursor = 0.0
     for v in views:
         if v["t0"] - cursor > 0.01:
             shots.append((placeholder, v["t0"] - cursor))
-        shots.append((Path(v["file"]), v["t1"] - v["t0"]))
+        shots.append((opaque(Path(v["file"])), v["t1"] - v["t0"]))
         cursor = v["t1"]
     if duration - cursor > 0.01:
         shots.append((placeholder, duration - cursor))
@@ -179,4 +202,5 @@ def render_preview(views: list[dict], duration: float, audio: Path, placeholder:
          "-preset", "veryfast", "-tune", "stillimage", "-crf", "30", "-pix_fmt", "yuv420p",
          "-c:a", "aac", "-b:a", "64k", "-shortest", str(out)], check=True)
     listing.unlink(missing_ok=True)
+    shutil.rmtree(flat_dir, ignore_errors=True)
     return out

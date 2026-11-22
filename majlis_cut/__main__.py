@@ -18,7 +18,7 @@ from .align import align, apply_edits, build_plan, fill_gaps
 from .asr import audio_duration, stamp, transcribe
 from .book import build_book, guess_page_offset, load_turath_pages, read_pdf_text, render_view
 
-VIEW_VERSION = 1     # raise when the way page pictures are drawn changes
+VIEW_VERSION = 2     # raise when the way page pictures are drawn changes (2: transparent without a background)
 from .export import Timeline, camera_placeholder, render_preview
 from .sync import camera_track, place_all, probe_video, save
 from .voice import VoiceModel, load_audio
@@ -194,6 +194,8 @@ def run() -> None:
                     help="share of the page height visible at once (0.55 = about half a page)")
     ap.add_argument("--background", type=Path,
                     help="picture behind the page (your design with the book title and logo)")
+    ap.add_argument("--no-paper", action="store_true",
+                    help="remove the page's paper: only the ink, on a transparent ground")
     ap.add_argument("--overlay-size", type=float, default=1.0,
                     help="height of the page card as a share of the frame height")
     ap.add_argument("--overlay-pos", choices=["left", "center", "right"], default="center",
@@ -323,7 +325,7 @@ def run() -> None:
     # changed PDF, page numbering, size or background can never reuse old pictures.
     look = json.dumps([stamp(args.pdf), args.page_offset, args.window, args.overlay_size,
                        args.overlay_pos, stamp(args.background) if args.background else None,
-                       VIEW_VERSION], sort_keys=True)
+                       args.no_paper, VIEW_VERSION], sort_keys=True)
     views_dir = res / "pages" / hashlib.sha1(look.encode()).hexdigest()[:10]
     if (res / "pages").exists():
         for old in (res / "pages").iterdir():
@@ -332,7 +334,7 @@ def run() -> None:
     for n, v in enumerate(plan["views"]):
         v["file"] = str(render_view(book, v["page"], v["stop"], views_dir,
                                     scale=args.overlay_size, pos=args.overlay_pos,
-                                    background=args.background))
+                                    background=args.background, paper=not args.no_paper))
         if n % 10 == 0:
             stage(4, n / max(1, len(plan["views"])))
 
