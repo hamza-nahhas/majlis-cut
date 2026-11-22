@@ -296,13 +296,40 @@ def build_book(pdf_path: Path, page_text: dict[int, str] | dict[int, list], page
 
 # ---------------------------------------------------------------- views ----
 
+def remove_paper(img):
+    """The page's ink alone on a transparent ground: paper turns clear, ink stays.
+
+    The paper tone is read off the picture itself (most of a page is paper), so
+    yellowed scans work too. Each pixel's opacity is how far it is from the paper
+    towards the darkest ink, and its colour is the ink colour with the paper mixed
+    out of it, so red headings stay red and letter edges carry no paper tint.
+    """
+    import numpy as np
+    from PIL import Image
+
+    rgb = np.asarray(img.convert("RGB"), dtype=np.float32)
+    lum = rgb @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+    paper_lum = np.percentile(lum, 60)
+    dark = lum[lum < paper_lum * 0.5]
+    ink_lum = float(np.median(dark)) if dark.size else paper_lum * 0.3   # typical ink, so text is solid
+    near = lum >= np.percentile(lum, 50)                 # the paper's own colour
+    paper = rgb[near].mean(axis=0) if near.any() else np.full(3, 255, np.float32)
+    clear = paper_lum * 0.94                             # specks and grain just under the paper vanish
+    alpha = np.clip((clear - lum) / max(1.0, clear - ink_lum), 0, 1)
+    ink = (rgb - paper * (1 - alpha[..., None])) / np.maximum(alpha[..., None], 1e-3)
+    out = np.dstack([np.clip(ink, 0, 255), alpha * 255]).astype(np.uint8)
+    return Image.fromarray(out, "RGBA")
+
+
 def render_view(book: Book, page_idx: int, stop: int, out_dir: Path,
                 size: tuple[int, int] = (1920, 1080), scale: float = 1.0,
-                pos: str = "center", background: Path | None = None) -> Path:
+                pos: str = "center", background: Path | None = None, paper: bool = True) -> Path:
     """Render one window of one page as a full frame and return its path.
 
     The page is a card laid on the background picture (the team's own design with
-    the book title and logo), or on a plain colour when none is given.
+    the book title and logo). Without one the rest of the frame is transparent, so
+    whatever is under the page track in Resolve shows around the card.
+    paper=False removes the page's paper too: only the ink is left (see remove_paper).
     scale: card height as a share of the frame height. pos: left, center or right.
     """
     from PIL import Image, ImageDraw
@@ -311,6 +338,8 @@ def render_view(book: Book, page_idx: int, stop: int, out_dir: Path,
     look = f"{pos[0]}{round(scale * 100)}"
     if background:
         look += f"b{int(background.stat().st_mtime) % 100000}"
+    if not paper:
+        look += "i"                                     # ink only
     # Ends with a letter, not a digit: Resolve must not read the stills as an image sequence.
     out = out_dir / f"{look}_page{book.printed[page_idx]:04d}_{'abcdefghij'[stop]}.png"
     if out.exists():
@@ -336,12 +365,17 @@ def render_view(book: Book, page_idx: int, stop: int, out_dir: Path,
             draw.rectangle([0, 0, img.width, int((b - top) * ph * zoom) + 1], fill="white")
         if a < bottom < b:
             draw.rectangle([0, int((a - top) * ph * zoom) - 1, img.width, img.height], fill="white")
+    card = img if paper else remove_paper(img)
     if background:
-        canvas = Image.open(background).convert("RGB").resize(size, Image.LANCZOS)
+        canvas = Image.open(background).convert("RGBA").resize(size, Image.LANCZOS)
     else:
-        canvas = Image.new("RGB", size, (96, 180, 164))
+        canvas = Image.new("RGBA", size, (0, 0, 0, 0))
     margin = round(0.03 * fw)
     x = {"left": margin, "right": fw - img.width - margin}.get(pos, (fw - img.width) // 2)
-    canvas.paste(img, (max(0, x), (fh - img.height) // 2))
+    layer = Image.new("RGBA", size, (0, 0, 0, 0))
+    layer.paste(card.convert("RGBA"), (max(0, x), (fh - img.height) // 2))
+    canvas = Image.alpha_composite(canvas, layer)
+    if canvas.getextrema()[3][0] == 255:                # nothing see-through: no alpha needed
+        canvas = canvas.convert("RGB")
     canvas.save(out, optimize=True)
     return out

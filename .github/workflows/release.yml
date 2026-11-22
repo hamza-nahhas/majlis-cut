@@ -29,6 +29,7 @@ jobs:
           pip install -r requirements.txt
           python tests/test_fill.py
           python tests/test_update.py
+          python tests/test_paper.py
       - name: Build the zip
         run: |
           name="majlis-cut-$GITHUB_REF_NAME"

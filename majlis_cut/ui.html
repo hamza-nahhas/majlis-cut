@@ -90,7 +90,8 @@ button:disabled { opacity: .45; cursor: default; }
   border-radius: 8px; padding: 10px 14px; max-height: 410px; overflow: auto; font-size: 16px; line-height: 1.9; }
 .look { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 26px; align-items: start; }
 .shot { position: sticky; top: 84px; }
-.shot img { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; border: 1px solid var(--line); background: var(--field);
+.shot img { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; border: 1px solid var(--line);
+  background: repeating-conic-gradient(#d4d9d7 0 25%, #f4f6f5 0 50%) 0 0 / 20px 20px;   /* shows what is see-through */
   display: block; object-fit: contain; }
 .shot.busy img { opacity: .5; }
 .summary { display: grid; grid-template-columns: 130px 1fr; gap: 4px 14px; margin: 0 0 18px; }
@@ -283,9 +284,14 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000
       </div>
       <div class="field">
         <button class="tile" data-pick="image" data-for="background"><span class="ico">▨</span>
-          <span class="what"><b>صورة الخلفية</b><span id="background_shown">تصميمكم بقياس الفيديو، فيه العنوان والشعار</span></span>
+          <span class="what"><b>صورة الخلفية (اختيارية)</b><span id="background_shown">تصميمكم بقياس الفيديو، فيه العنوان والشعار</span></span>
           <span class="act">اختيار</span></button>
         <div class="row" style="margin-top:6px"><button class="ghost hidden" id="clearBackground">إزالة الخلفية</button></div>
+        <small>بدونها يكون ما حول الصفحة شفافًا (المربعات في المعاينة)، فيظهر تحتها في Resolve ما في المسار V1 من كاميرا أو غيرها.</small>
+      </div>
+      <div class="field">
+        <label class="row"><input type="checkbox" id="no_paper"> إزالة ورق الصفحة</label>
+        <small>يبقى النص وحده على خلفية شفافة أو على صورة الخلفية. يناسب الخلفيات الفاتحة، لأن الحبر يبقى بلونه.</small>
       </div>
       <div class="field">
         <label for="overlay_size">حجم بطاقة الصفحة: <span id="overlaySizeLabel"></span></label>
@@ -370,7 +376,7 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000
 const $ = id => document.getElementById(id);
 const form = { audio: "", pdf: "", out: "", cam_main: [], cam_backup: [], text_source: "turath", book_id: null, book_name: "",
                vol: "", page_offset: 0, pages: "", window: 0.55, asr: "whisper",
-               overlay_size: 1, overlay_pos: "center", background: "", fill_with_book: false };
+               overlay_size: 1, overlay_pos: "center", background: "", fill_with_book: false, no_paper: false };
 let plan = null, pollTimer = null, saveTimer = null, pending = 0, currentOut = "", step = 0, hasResult = false;
 let asrSeen = null, shotTimer = null, offsetCheckedFor = "";
 
@@ -449,6 +455,7 @@ function paint() {
   $("overlay_size").value = form.overlay_size;
   $("overlay_pos").value = form.overlay_pos;
   $("fill_with_book").checked = !!form.fill_with_book;
+  $("no_paper").checked = !!form.no_paper;
   $("overlaySizeLabel").textContent = Math.round(form.overlay_size * 100) + "% من ارتفاع الإطار";
   for (const r of document.querySelectorAll("input[name=asr]")) r.checked = r.value === form.asr;
   $("elevenlabs_key").classList.toggle("hidden", form.asr !== "elevenlabs");
@@ -479,6 +486,7 @@ $("window").addEventListener("input", e => { form.window = parseFloat(e.target.v
 $("overlay_size").addEventListener("input", e => { form.overlay_size = parseFloat(e.target.value); paint(); save(); refreshShot(); });
 $("overlay_pos").addEventListener("change", e => { form.overlay_pos = e.target.value; save(); refreshShot(); });
 $("fill_with_book").addEventListener("change", e => { form.fill_with_book = e.target.checked; save(); });
+$("no_paper").addEventListener("change", e => { form.no_paper = e.target.checked; save(); refreshShot(); });
 $("clearBackground").addEventListener("click", () => { form.background = ""; paint(); save(); refreshShot(); });
 for (const r of document.querySelectorAll("input[name=text_source]")) {
   r.addEventListener("change", () => {
@@ -614,7 +622,7 @@ function refreshShot() {
       $("shotNote").textContent = "تعذّر رسم المعاينة. تحقق من ترقيم الصفحات في خطوة الكتاب."; };
     img.src = "/api/sample?" + new URLSearchParams({ pdf: form.pdf, id: fromPdf() ? "" : form.book_id, vol: form.vol, page,
       offset: offsetNow(), window: form.window, size: form.overlay_size, pos: form.overlay_pos,
-      background: form.background || "", v: Date.now() });
+      background: form.background || "", paper: form.no_paper ? "0" : "1", v: Date.now() });
   }, 300);
 }
 
@@ -625,6 +633,7 @@ function paintSummary() {
     ["الكاميرات", (form.cam_main.length || form.cam_backup.length)
       ? form.cam_main.length + " أساسية، " + form.cam_backup.length + " احتياط" : "لا مقاطع"],
     ["الأماكن الفارغة", form.fill_with_book ? "تملؤها صفحة الكتاب" : "تبقى فارغة"],
+    ["ورق الصفحة", form.no_paper ? "مُزال: النص وحده" : "ظاهر"],
     ["مجلد الدرس", form.out]];
   $("summary").replaceChildren(...rows.flatMap(([k, v]) => {
     const dt = document.createElement("dt"); dt.textContent = k;
