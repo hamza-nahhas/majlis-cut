@@ -243,6 +243,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._bytes(PAGE.read_bytes(), "text/html; charset=utf-8")
             elif url.path == "/api/state":
                 self._json({"form": load_state(), "job": JOB.status()})
+            elif url.path == "/favicon.png":
+                self._bytes(PAGE.with_name("icon.png").read_bytes(), "image/png")
             elif url.path == "/api/version":
                 self._json(update.check(force=q.get("force") == "1") if q.get("check") else
                            {"current": __version__})

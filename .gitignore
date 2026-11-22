@@ -6,3 +6,4 @@ ui_state.json
 docs/test_background.png
 .restart.json
 *.old-update
+build/
