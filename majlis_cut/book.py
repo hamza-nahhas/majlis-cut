@@ -222,20 +222,25 @@ class Book:
         return best
 
 
+def ocr_cache(pdf_path: Path, cache_dir: Path) -> Path:
+    """The file that keeps what was read off this PDF's pages."""
+    import hashlib
+
+    info = pdf_path.stat()
+    key = hashlib.sha1(f"{pdf_path.resolve()}|{info.st_size}|{int(info.st_mtime)}".encode()).hexdigest()[:10]
+    return cache_dir / f"ocr_{key}.json"
+
+
 def read_pdf_text(pdf_path: Path, cache_dir: Path, first: int | None = None,
                   last: int | None = None, progress=None) -> dict[int, list]:
     """Return {PDF page number: words read off the scan, each with its place on the page}.
 
     What was read is kept in cache_dir, so each page of a book is read once."""
-    import hashlib
-
     from .ocr import drop_running_heads, ocr_pages
 
-    info = pdf_path.stat()
-    key = hashlib.sha1(f"{pdf_path.resolve()}|{info.st_size}|{int(info.st_mtime)}".encode()).hexdigest()[:10]
     count = fitz.open(pdf_path).page_count
     wanted = [i for i in range(count) if (not first or i + 1 >= first) and (not last or i + 1 <= last)]
-    pages = ocr_pages(pdf_path, wanted, cache_dir / f"ocr_{key}.json", progress)
+    pages = ocr_pages(pdf_path, wanted, ocr_cache(pdf_path, cache_dir), progress)
     drop_running_heads(pages)
     return {i + 1: ws for i, ws in pages.items()}
 
@@ -321,21 +326,63 @@ def remove_paper(img):
     return Image.fromarray(out, "RGBA")
 
 
+@dataclass
+class ViewFrame:
+    """Where one window of a page lands in the frame: page fractions to frame pixels."""
+    clip: fitz.Rect     # the window, in PDF points
+    zoom: float
+    left: float         # page fraction at the card's left edge
+    top: float          # page fraction at the card's top edge
+    sx: float           # frame pixels per page width
+    sy: float           # frame pixels per page height
+    x: int              # card's top-left corner in the frame
+    y: int
+    w: int              # card size in pixels
+    h: int
+
+    def to_frame(self, fx: float, fy: float) -> tuple[float, float]:
+        return self.x + (fx - self.left) * self.sx, self.y + (fy - self.top) * self.sy
+
+
+def view_frame(book: Book, page_idx: int, stop: int, size: tuple[int, int] = (1920, 1080),
+               scale: float = 1.0, pos: str = "center") -> ViewFrame:
+    page = fitz.open(book.pdf_path)[page_idx]
+    pw, ph = page.rect.width, page.rect.height
+    top = book.stops(page_idx)[stop]
+    bottom = min(1.0, top + book.window_h)
+    pad_x = 0.035
+    left = max(0, book.x0 - pad_x)
+    clip = fitz.Rect(left * pw, top * ph, min(1, book.x1 + pad_x) * pw, bottom * ph)
+    fw, fh = size
+    zoom = min(scale * fh / (book.window_h * ph), 0.96 * fw / clip.width)
+    card = (clip * fitz.Matrix(zoom, zoom)).irect
+    w, h = card.width, card.height
+    margin = round(0.03 * fw)
+    x = {"left": margin, "right": fw - w - margin}.get(pos, (fw - w) // 2)
+    return ViewFrame(clip, zoom, left, top, pw * zoom, ph * zoom, max(0, x), (fh - h) // 2, w, h)
+
+
 def render_view(book: Book, page_idx: int, stop: int, out_dir: Path,
                 size: tuple[int, int] = (1920, 1080), scale: float = 1.0,
-                pos: str = "center", background: Path | None = None, paper: bool = True) -> Path:
+                pos: str = "center", background: Path | None = None, paper: bool = True,
+                ink_only: bool = False) -> Path:
     """Render one window of one page as a full frame and return its path.
 
     The page is a card laid on the background picture (the team's own design with
     the book title and logo). Without one the rest of the frame is transparent, so
     whatever is under the page track in Resolve shows around the card.
     paper=False removes the page's paper too: only the ink is left (see remove_paper).
+    ink_only: the ink alone on a clear frame, laid over the reading highlight so the
+    letters stay on top of it.
     scale: card height as a share of the frame height. pos: left, center or right.
     """
     from PIL import Image, ImageDraw
 
     out_dir.mkdir(parents=True, exist_ok=True)
     look = f"{pos[0]}{round(scale * 100)}"
+    if ink_only:
+        look += "k"
+        background, paper = None, False
     if background:
         look += f"b{int(background.stat().st_mtime) % 100000}"
     if not paper:
@@ -346,15 +393,11 @@ def render_view(book: Book, page_idx: int, stop: int, out_dir: Path,
         return out
     lay = book.layouts[page_idx]
     page = fitz.open(book.pdf_path)[page_idx]
-    pw, ph = page.rect.width, page.rect.height
-    top = book.stops(page_idx)[stop]
+    ph = page.rect.height
+    frame = view_frame(book, page_idx, stop, size, scale, pos)
+    top, zoom = frame.top, frame.zoom
     bottom = min(1.0, top + book.window_h)
-    pad_x = 0.035
-    clip = fitz.Rect(max(0, book.x0 - pad_x) * pw, top * ph,
-                     min(1, book.x1 + pad_x) * pw, bottom * ph)
-    fw, fh = size
-    zoom = min(scale * fh / (book.window_h * ph), 0.96 * fw / clip.width)
-    pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=clip, colorspace=fitz.csRGB)
+    pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=frame.clip, colorspace=fitz.csRGB)
     img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
     # Blank out lines that the window edge would cut in half.
     draw = ImageDraw.Draw(img)
@@ -370,10 +413,8 @@ def render_view(book: Book, page_idx: int, stop: int, out_dir: Path,
         canvas = Image.open(background).convert("RGBA").resize(size, Image.LANCZOS)
     else:
         canvas = Image.new("RGBA", size, (0, 0, 0, 0))
-    margin = round(0.03 * fw)
-    x = {"left": margin, "right": fw - img.width - margin}.get(pos, (fw - img.width) // 2)
     layer = Image.new("RGBA", size, (0, 0, 0, 0))
-    layer.paste(card.convert("RGBA"), (max(0, x), (fh - img.height) // 2))
+    layer.paste(card.convert("RGBA"), (frame.x, frame.y))
     canvas = Image.alpha_composite(canvas, layer)
     if canvas.getextrema()[3][0] == 255:                # nothing see-through: no alpha needed
         canvas = canvas.convert("RGB")

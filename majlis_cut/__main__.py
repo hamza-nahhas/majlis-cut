@@ -20,12 +20,13 @@ from .book import build_book, guess_page_offset, load_turath_pages, read_pdf_tex
 
 VIEW_VERSION = 2     # raise when the way page pictures are drawn changes (2: transparent without a background)
 from .export import Timeline, camera_placeholder, render_preview
+from .highlight import CLIP_SCALE, DEFAULT_COLOR, make_clips, parse_color
 from .sync import camera_track, place_all, probe_video, save
 from .voice import VoiceModel, load_audio
 
 VIDEO_EXT = {".mp4", ".mov", ".mts", ".m2ts", ".mxf", ".avi", ".mkv"}
 STAGES = ["تفريغ الصوت", "قراءة الكتاب", "مطابقة التسجيل مع الكتاب", "مزامنة الكاميرات",
-          "تجهيز صور الصفحات", "كتابة الخط الزمني", "تصيير المعاينة"]
+          "تجهيز صور الصفحات", "تحديد الكلمات المقروءة", "كتابة الخط الزمني", "تصيير المعاينة"]
 
 
 def mmss(t: float) -> str:
@@ -160,6 +161,67 @@ def explain(exc: Exception) -> str:
     return f"خطأ غير متوقع ({name}): {exc}"
 
 
+def highlight_views(plan: dict, args, book, words: list[dict], pos, books: Path, views_dir: Path,
+                    res: Path, fps: float, color: tuple[int, int, int], progress) -> list[str]:
+    """Highlight clips (V3) and ink pictures (V4) for every page view.
+
+    The words' places come from reading the shown pages with the Windows reader;
+    without it only the line being read is highlighted. Returns notes for the report."""
+    from .book import ocr_cache
+    from .ocr import available, ocr_pages
+
+    notes: list[str] = []
+    pages = sorted({v["page"] for v in plan["views"]})
+    ocr: dict[int, list] = {}
+    reason = available()
+    if reason:
+        notes.append(f"تحديد الكلمة يحتاج قارئ الصفحات في ويندوز، فحُدِّد السطر وحده. ({reason})")
+    elif pages:
+        ocr = ocr_pages(args.pdf, pages, ocr_cache(args.pdf, books), lambda f: progress(0.3 * f), boxes=True)
+    # Named after the colour too, so changing the colour keeps nothing stale.
+    out_dir = res / "highlight" / f"{views_dir.name}_{'%02x%02x%02x' % color}"
+    if (res / "highlight").exists():
+        for old in (res / "highlight").iterdir():
+            if old != out_dir:
+                shutil.rmtree(old) if old.is_dir() else old.unlink()
+    found = make_clips(plan["views"], words, pos, book, ocr, color, fps, out_dir,
+                       scale=args.overlay_size, place=args.overlay_pos,
+                       progress=lambda f: progress(0.3 + 0.65 * f))
+    for v in plan["views"]:
+        if v.get("highlight"):
+            v["ink"] = str(render_view(book, v["page"], v["stop"], views_dir, scale=args.overlay_size,
+                                       pos=args.overlay_pos, ink_only=True))
+    line_only = [p for p in found["line_only"] if ocr]
+    if line_only:
+        shown = "، ".join(str(p) for p in line_only[:12]) + ("…" if len(line_only) > 12 else "")
+        notes.append(f"في الصفحات {shown} لم تُطابَق كلمات الكتاب بصورة الصفحة، فحُدِّد السطر وحده. "
+                     "قد تكون طبعة الملف غير طبعة النص، أو الصفحة غير واضحة.")
+    plan["highlight"] = {"color": "#%02x%02x%02x" % color, "mb": round(found["bytes"] / 1e6, 1),
+                         "line_only": found["line_only"] if ocr else "all"}
+    return notes
+
+
+def preview_highlights(views: list[dict], words, pos, book, args, color, books: Path,
+                       height: int = 720) -> list[dict]:
+    """The views' highlights drawn at the preview's size."""
+    from .book import ocr_cache, view_frame
+    from .highlight import Highlight, page_boxes, view_events
+    from .ocr import available, ocr_pages
+
+    pages = sorted({v["page"] for v in views if v.get("highlight")})
+    ocr = {} if available() or not pages else ocr_pages(args.pdf, pages, ocr_cache(args.pdf, books), boxes=True)
+    boxes = {p: page_boxes(book, p, ocr.get(p, [])) for p in pages}
+    out = []
+    for v in views:
+        if not v.get("highlight"):
+            continue
+        frame = view_frame(book, v["page"], v["stop"], scale=args.overlay_size, pos=args.overlay_pos)
+        events = view_events(v, words, pos, book, boxes[v["page"]], frame)
+        out.append({"t0": v["t0"], "t1": v["t1"], "ink": v["ink"],
+                    "hl": Highlight(events, v["t1"] - v["t0"], color, scale=height / 1080)})
+    return out
+
+
 class LessonError(Exception):
     """A problem with the lesson's inputs, already worded for the user."""
 
@@ -200,6 +262,10 @@ def run() -> None:
                     help="height of the page card as a share of the frame height")
     ap.add_argument("--overlay-pos", choices=["left", "center", "right"], default="center",
                     help="where the page card sits on the background")
+    ap.add_argument("--highlight", action="store_true",
+                    help="highlight the word being read and its line (a clip on V3, the ink on V4)")
+    ap.add_argument("--highlight-color", default=DEFAULT_COLOR,
+                    help="colour of the highlight, e.g. #4096ff")
     ap.add_argument("--cam-main", type=Path, nargs="*", default=[],
                     help="main camera clips of this lesson (files or a folder)")
     ap.add_argument("--cam-backup", type=Path, nargs="*", default=[],
@@ -213,6 +279,7 @@ def run() -> None:
     ap.add_argument("--json-progress", action="store_true",
                     help="print machine-readable progress lines on stdout (used by the interface)")
     args = ap.parse_args()
+    highlight_color = parse_color(args.highlight_color) if args.highlight else None
 
     def stage(n: int, p: float | None = None) -> None:
         if p is None:
@@ -338,7 +405,15 @@ def run() -> None:
         if n % 10 == 0:
             stage(4, n / max(1, len(plan["views"])))
 
-    stage(5)
+    hl_notes: list[str] = []
+    if highlight_color:
+        stage(5)
+        hl_notes = highlight_views(plan, args, book, words, result["pos"], books, views_dir, res, fps,
+                                   highlight_color, lambda f: stage(5, f))
+    elif (res / "highlight").exists():
+        shutil.rmtree(res / "highlight")             # turned off since the last run
+
+    stage(6)
     sound_end = cameras[0]["t1"] if ready_video else duration
     # What goes on the page track: the reading, and with --fill-with-book every empty place too.
     shown = plan["views"]
@@ -353,8 +428,16 @@ def run() -> None:
                      has_audio=c.get("has_audio", False))
     for v in shown:
         tl.add_video(2, Path(v["file"]), v["t0"], v["t1"], still=True)
+    # The highlight between the page and its ink: letters stay on top of it.
+    hl_size = (round(1920 * CLIP_SCALE), round(1080 * CLIP_SCALE))
+    for v in plan["views"]:
+        if v.get("highlight"):
+            tl.add_video(3, Path(v["highlight"]), v["t0"], v["t1"], src_duration=v["highlight_s"],
+                         size=hl_size, alpha=True)
+            tl.add_video(4, Path(v["ink"]), v["t0"], v["t1"], still=True)
     tl.write_fcp7_xml(res / "timeline.xml")
     plan["warnings"] = checks(plan, args, text, asr.get("repaired_gaps", 0))
+    plan["warnings"] += [{"text": note, "t": None} for note in hl_notes]
     # What produced this result, so it can be explained or reproduced later.
     plan["run"] = {
         "tool_version": VERSION,
@@ -368,6 +451,9 @@ def run() -> None:
     read = [s for s in plan["segments"] if s["kind"] == "read"]
     lines = [f"reading {sum(s['t1'] - s['t0'] for s in read) / 60:.1f} min of {duration / 60:.1f} min, "
              f"{len(read)} passages, {len(plan['views'])} page views", ""]
+    if plan.get("highlight"):
+        lines[1:1] = [f"highlight {plan['highlight']['color']}: {plan['highlight']['mb']} MB of clips on V3, "
+                      "the ink on V4"]
     if args.fill_with_book:
         lines[1:1] = [f"the page also fills {plan['filled'] / 60:.1f} min where nothing else is on screen"]
     for s in plan["segments"]:
@@ -387,9 +473,13 @@ def run() -> None:
     print(lines[0], file=sys.stderr)
 
     if not args.no_preview:
-        stage(6)
+        stage(7)
+        highlights = None
+        if highlight_color:
+            highlights = preview_highlights(plan["views"], words, result["pos"], book, args, highlight_color, books)
         render_preview(shown, plan["duration"], args.audio,
-                       camera_placeholder(work / "camera_placeholder.png"), rev / "preview.mp4")
+                       camera_placeholder(work / "camera_placeholder.png"), rev / "preview.mp4",
+                       highlights=highlights)
     print(f"done: {out}", file=sys.stderr)
     if args.json_progress:
         print(json.dumps({"done": True}), flush=True)
