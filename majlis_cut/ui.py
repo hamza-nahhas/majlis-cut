@@ -26,9 +26,9 @@ import fitz
 from . import __version__, update
 from .__main__ import STAGES
 from .arabic import normalize
-from .book import (build_book, guess_page_offset, load_turath_pages, read_pdf_text, render_view,
-                   turath_catalog,
-                   turath_volumes)
+from .book import (build_book, guess_page_offset, load_turath_pages, ocr_cache, read_pdf_text,
+                   render_view, turath_catalog, turath_volumes, view_frame)
+from .highlight import DEFAULT_COLOR, parse_color
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "cache"
@@ -66,6 +66,28 @@ def page_as_read(pdf: Path, page: int) -> str:
     return "\n".join(" ".join(ws) for ws in lines.values())
 
 
+def sample_highlight(book, idx: int, shot: Path, tmp: Path, color, look: dict) -> Path:
+    """The sample page with the reading highlight resting on one of its words."""
+    import numpy as np
+    from PIL import Image
+
+    from .highlight import sample
+    from .ocr import available, ocr_pages
+
+    words = [] if available() else ocr_pages(book.pdf_path, [idx], ocr_cache(book.pdf_path, CACHE),
+                                             boxes=True)[idx]
+    frame = view_frame(book, idx, 0, scale=look["scale"], pos=look["pos"])
+    hl = sample(book, idx, 0, frame, words, color)
+    if hl is None:
+        return shot
+    page = Image.open(shot).convert("RGBA")
+    ink = Image.open(render_view(book, idx, 0, tmp, ink_only=True, **look)).convert("RGBA")
+    out = Image.alpha_composite(Image.alpha_composite(page, Image.fromarray(np.ascontiguousarray(hl))), ink)
+    path = tmp / "sample_highlight.png"
+    out.save(path)
+    return path
+
+
 class Job:
     def __init__(self) -> None:
         self.proc: subprocess.Popen | None = None
@@ -100,6 +122,8 @@ class Job:
             cmd += ["--fill-with-book"]
         if cfg.get("no_paper"):
             cmd += ["--no-paper"]
+        if cfg.get("highlight"):
+            cmd += ["--highlight", "--highlight-color", cfg.get("highlight_color") or DEFAULT_COLOR]
         for flag, key in (("--cam-main", "cam_main"), ("--cam-backup", "cam_backup")):
             paths = [p for p in cfg.get(key) or [] if p]
             if paths:
@@ -287,9 +311,11 @@ class Handler(BaseHTTPRequestHandler):
                 background = Path(q["background"]) if q.get("background") else None
                 tmp = Path(tempfile.mkdtemp(prefix="majlis_cut_"))
                 try:
-                    shot = render_view(book, idx, 0, tmp, scale=float(q.get("size", 1)),
-                                       pos=q.get("pos", "center"), background=background,
-                                       paper=q.get("paper") != "0")
+                    look = {"scale": float(q.get("size", 1)), "pos": q.get("pos", "center")}
+                    shot = render_view(book, idx, 0, tmp, background=background,
+                                       paper=q.get("paper") != "0", **look)
+                    if q.get("hl"):
+                        shot = sample_highlight(book, idx, shot, tmp, parse_color(q["hl"]), look)
                     self._bytes(shot.read_bytes(), "image/png")
                 finally:
                     shutil.rmtree(tmp, ignore_errors=True)

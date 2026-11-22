@@ -32,6 +32,7 @@ jobs:
           python tests/test_fill.py
           python tests/test_update.py
           python tests/test_paper.py
+          python tests/test_highlight.py
       - name: Build the zip
         run: |
           name="majlis-cut-$GITHUB_REF_NAME"

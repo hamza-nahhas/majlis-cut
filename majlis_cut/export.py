@@ -33,10 +33,14 @@ class Timeline:
 
     def add_video(self, track: int, path: Path, t0: float, t1: float, src_in: float = 0.0,
                   still: bool = False, src_duration: float | None = None,
-                  has_audio: bool = False) -> None:
+                  has_audio: bool = False, size: tuple[int, int] | None = None,
+                  alpha: bool = False) -> None:
+        """size: the file's own picture size when it differs from the timeline's.
+        alpha: the file carries transparency (stills always may)."""
         self.video.setdefault(track, []).append(
             {"path": Path(path), "t0": t0, "t1": t1, "in": src_in, "still": still,
-             "src_duration": src_duration, "has_audio": has_audio, "channels": 2})
+             "src_duration": src_duration, "has_audio": has_audio, "channels": 2,
+             "size": size, "alpha": alpha})
 
     def add_audio(self, path: Path, t0: float, t1: float, src_in: float, src_duration: float,
                   channels: int = 2) -> None:
@@ -78,8 +82,9 @@ class Timeline:
             if kind == "video":
                 v = ET.SubElement(m, "video")
                 sc = ET.SubElement(v, "samplecharacteristics")
-                ET.SubElement(sc, "width").text = str(self.size[0])
-                ET.SubElement(sc, "height").text = str(self.size[1])
+                w, h = clip.get("size") or self.size
+                ET.SubElement(sc, "width").text = str(w)
+                ET.SubElement(sc, "height").text = str(h)
                 if clip.get("still"):
                     ET.SubElement(v, "stillframe").text = "TRUE"
             else:
@@ -106,6 +111,7 @@ class Timeline:
             file_el(ci, clip, kind)
             if kind == "video" and clip.get("still"):
                 ET.SubElement(ci, "stillframe").text = "TRUE"
+            if kind == "video" and (clip.get("still") or clip.get("alpha")):
                 ET.SubElement(ci, "alphatype").text = "straight"     # page pictures may be see-through
             if kind == "audio":
                 st = ET.SubElement(ci, "sourcetrack")
@@ -157,11 +163,13 @@ def camera_placeholder(out: Path, size: tuple[int, int] = (1920, 1080)) -> Path:
 
 
 def render_preview(views: list[dict], duration: float, audio: Path, placeholder: Path, out: Path,
-                   fps: int = 5, height: int = 720) -> Path:
+                   fps: int = 5, height: int = 720, highlights: list[dict] | None = None) -> Path:
     """Low-resolution MP4 of the result: page views over reading, placeholder elsewhere.
 
     See-through page pictures are shown over the placeholder, as they would sit
     over the camera in Resolve.
+    highlights: [{t0, t1, hl, ink}] the reading highlight of a view (a Highlight drawn
+    at this preview's scale) and the ink picture laid over it.
     """
     from PIL import Image
 
@@ -189,6 +197,10 @@ def render_preview(views: list[dict], duration: float, audio: Path, placeholder:
         cursor = v["t1"]
     if duration - cursor > 0.01:
         shots.append((placeholder, duration - cursor))
+    if highlights:
+        _preview_frames(shots, highlights, audio, out, fps, height)
+        shutil.rmtree(flat_dir, ignore_errors=True)
+        return out
     lines = []
     for path, dur in shots:
         lines.append(f"file '{path.resolve().as_posix()}'")
@@ -204,3 +216,65 @@ def render_preview(views: list[dict], duration: float, audio: Path, placeholder:
     listing.unlink(missing_ok=True)
     shutil.rmtree(flat_dir, ignore_errors=True)
     return out
+
+
+def _preview_frames(shots: list[tuple[Path, float]], highlights: list[dict], audio: Path, out: Path,
+                    fps: int, height: int) -> None:
+    """The preview drawn frame by frame, for the highlight to move in it."""
+    import numpy as np
+    from PIL import Image
+
+    width = round(height * 16 / 9) // 2 * 2
+    pictures: dict[Path, np.ndarray] = {}
+    inks: dict[Path, np.ndarray] = {}
+
+    def picture(path: Path) -> np.ndarray:
+        if path not in pictures:
+            img = Image.open(path).convert("RGB").resize((width, height), Image.BILINEAR)
+            pictures[path] = np.ascontiguousarray(np.asarray(img))
+        return pictures[path]
+
+    def ink(path: Path) -> np.ndarray:
+        if path not in inks:
+            img = Image.open(path).convert("RGBA").resize((width, height), Image.BILINEAR)
+            inks[path] = np.asarray(img, np.float32) / 255
+        return inks[path]
+
+    starts = np.cumsum([0.0] + [d for _, d in shots])
+    total = int(starts[-1] * fps)
+    hls = sorted(highlights, key=lambda h: h["t0"])
+    cmd = ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}",
+           "-r", str(fps), "-i", "-", "-i", str(audio), "-c:v", "libx264", "-preset", "veryfast",
+           "-crf", "30", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "64k", "-shortest", str(out)]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    shot = hi = 0
+    try:
+        for i in range(total):
+            t = i / fps
+            while shot + 1 < len(shots) and starts[shot + 1] <= t:
+                shot += 1
+            while hi < len(hls) and hls[hi]["t1"] <= t:
+                hi += 1
+            base = picture(shots[shot][0])
+            h = hls[hi] if hi < len(hls) and hls[hi]["t0"] <= t else None
+            if h is None:
+                proc.stdin.write(base.data)
+                continue
+            a, area = h["hl"].alpha_area(t - h["t0"])
+            if area is None:
+                proc.stdin.write(base.data)
+                continue
+            x0, y0, x1, y1 = area
+            frame = base.copy()
+            region = frame[y0:y1, x0:x1].astype(np.float32)
+            cover = a[y0:y1, x0:x1, None]
+            region = region * (1 - cover) + h["hl"].color * cover
+            top = ink(Path(h["ink"]))[y0:y1, x0:x1]
+            region = region * (1 - top[..., 3:]) + top[..., :3] * 255 * top[..., 3:]
+            frame[y0:y1, x0:x1] = region.astype(np.uint8)
+            proc.stdin.write(frame.data)
+        proc.stdin.close()
+    except BrokenPipeError:
+        pass
+    if proc.wait() != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)

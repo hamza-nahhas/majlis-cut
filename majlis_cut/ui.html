@@ -295,6 +295,12 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000
         <small>يبقى النص وحده على خلفية شفافة أو على صورة الخلفية. يناسب الخلفيات الفاتحة، لأن الحبر يبقى بلونه.</small>
       </div>
       <div class="field">
+        <label class="row"><input type="checkbox" id="highlight"> تحديد الكلمة المقروءة وسطرها</label>
+        <label class="row hidden" id="highlightColorRow" style="font-weight:400;margin-top:6px">
+          <input type="color" id="highlight_color" value="#4096ff" style="width:44px;height:30px;padding:0;border:0;background:none"> لون التحديد</label>
+        <small>شريط ملوّن ينساب تحت الكلمات مع القارئ، وضوء خافت على السطر. يوضع في Resolve على المسار V3 تحت حبر الصفحة (V4)، فيمكن إطفاؤه من هناك. تغيير اللون وحده يعيد رسم التحديد فقط.</small>
+      </div>
+      <div class="field">
         <label for="overlay_size">حجم بطاقة الصفحة: <span id="overlaySizeLabel"></span></label>
         <input type="range" id="overlay_size" min="0.4" max="1" step="0.05" value="1" style="width:100%">
       </div>
@@ -377,7 +383,8 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000
 const $ = id => document.getElementById(id);
 const form = { audio: "", pdf: "", out: "", cam_main: [], cam_backup: [], text_source: "turath", book_id: null, book_name: "",
                vol: "", page_offset: 0, pages: "", window: 0.55, asr: "whisper",
-               overlay_size: 1, overlay_pos: "center", background: "", fill_with_book: false, no_paper: false };
+               overlay_size: 1, overlay_pos: "center", background: "", fill_with_book: false, no_paper: false,
+               highlight: false, highlight_color: "#4096ff" };
 let plan = null, pollTimer = null, saveTimer = null, pending = 0, currentOut = "", step = 0, hasResult = false;
 let asrSeen = null, shotTimer = null, offsetCheckedFor = "";
 
@@ -457,6 +464,9 @@ function paint() {
   $("overlay_pos").value = form.overlay_pos;
   $("fill_with_book").checked = !!form.fill_with_book;
   $("no_paper").checked = !!form.no_paper;
+  $("highlight").checked = !!form.highlight;
+  $("highlight_color").value = form.highlight_color || "#4096ff";
+  $("highlightColorRow").classList.toggle("hidden", !form.highlight);
   $("overlaySizeLabel").textContent = Math.round(form.overlay_size * 100) + "% من ارتفاع الإطار";
   for (const r of document.querySelectorAll("input[name=asr]")) r.checked = r.value === form.asr;
   $("elevenlabs_key").classList.toggle("hidden", form.asr !== "elevenlabs");
@@ -488,6 +498,8 @@ $("overlay_size").addEventListener("input", e => { form.overlay_size = parseFloa
 $("overlay_pos").addEventListener("change", e => { form.overlay_pos = e.target.value; save(); refreshShot(); });
 $("fill_with_book").addEventListener("change", e => { form.fill_with_book = e.target.checked; save(); });
 $("no_paper").addEventListener("change", e => { form.no_paper = e.target.checked; save(); refreshShot(); });
+$("highlight").addEventListener("change", e => { form.highlight = e.target.checked; paint(); save(); refreshShot(); });
+$("highlight_color").addEventListener("input", e => { form.highlight_color = e.target.value; save(); refreshShot(); });
 $("clearBackground").addEventListener("click", () => { form.background = ""; paint(); save(); refreshShot(); });
 for (const r of document.querySelectorAll("input[name=text_source]")) {
   r.addEventListener("change", () => {
@@ -623,7 +635,8 @@ function refreshShot() {
       $("shotNote").textContent = "تعذّر رسم المعاينة. تحقق من ترقيم الصفحات في خطوة الكتاب."; };
     img.src = "/api/sample?" + new URLSearchParams({ pdf: form.pdf, id: fromPdf() ? "" : form.book_id, vol: form.vol, page,
       offset: offsetNow(), window: form.window, size: form.overlay_size, pos: form.overlay_pos,
-      background: form.background || "", paper: form.no_paper ? "0" : "1", v: Date.now() });
+      background: form.background || "", paper: form.no_paper ? "0" : "1",
+      hl: form.highlight ? form.highlight_color : "", v: Date.now() });
   }, 300);
 }
 
@@ -635,6 +648,7 @@ function paintSummary() {
       ? form.cam_main.length + " أساسية، " + form.cam_backup.length + " احتياط" : "لا مقاطع"],
     ["الأماكن الفارغة", form.fill_with_book ? "تملؤها صفحة الكتاب" : "تبقى فارغة"],
     ["ورق الصفحة", form.no_paper ? "مُزال: النص وحده" : "ظاهر"],
+    ["تحديد القراءة", form.highlight ? "الكلمة وسطرها، باللون " + form.highlight_color : "بلا تحديد"],
     ["مجلد الدرس", form.out]];
   $("summary").replaceChildren(...rows.flatMap(([k, v]) => {
     const dt = document.createElement("dt"); dt.textContent = k;

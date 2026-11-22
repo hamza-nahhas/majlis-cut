@@ -22,6 +22,11 @@ class OcrWord:
     y: float      # middle of the word, fraction of the page height
     x: float      # middle of the word, fraction of the page width
     line: int = 0  # which line of the page it belongs to
+    # The word's box, fractions of the page size (None in caches written before 0.5).
+    x0: float | None = None
+    y0: float | None = None
+    x1: float | None = None
+    y1: float | None = None
 
 
 def available() -> str | None:
@@ -51,24 +56,31 @@ async def _read(engine, pix: fitz.Pixmap) -> list[OcrWord]:
         for w in line.words:
             r = w.bounding_rect
             row.append(OcrWord(w.text, (r.y + r.height / 2) / pix.height,
-                               (r.x + r.width / 2) / pix.width, n))
+                               (r.x + r.width / 2) / pix.width, n,
+                               r.x / pix.width, r.y / pix.height,
+                               (r.x + r.width) / pix.width, (r.y + r.height) / pix.height))
         # The reader hands the words of a line left to right; Arabic runs the other way.
         words.extend(sorted(row, key=lambda w: -w.x))
     return words
 
 
 def ocr_pages(pdf_path: Path, indexes: list[int], cache: Path | None = None,
-              progress=None) -> dict[int, list[OcrWord]]:
+              progress=None, boxes: bool = False) -> dict[int, list[OcrWord]]:
     """Words of the given PDF pages (0-based), in reading order.
 
-    cache: a json file that keeps what was read, so a page is read only once."""
+    cache: a json file that keeps what was read, so a page is read only once.
+    boxes: the words' boxes are needed; pages cached without them are read again."""
     from winrt.windows.globalization import Language
     from winrt.windows.media.ocr import OcrEngine
 
     done: dict[str, list] = {}
     if cache and cache.exists():
         done = json.loads(cache.read_text(encoding="utf-8"))
-    todo = [i for i in indexes if str(i) not in done]
+    def missing(i: int) -> bool:
+        got = done.get(str(i))
+        return got is None or (boxes and any(len(w) < 8 for w in got))
+
+    todo = [i for i in indexes if missing(i)]
     if todo:
         engine = OcrEngine.try_create_from_language(Language("ar"))
         if engine is None:
@@ -81,7 +93,9 @@ def ocr_pages(pdf_path: Path, indexes: list[int], cache: Path | None = None,
                 page = doc[i]
                 dpi = min(OCR_DPI, int(72 * limit / max(page.rect.width, page.rect.height)))
                 pix = page.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY)
-                done[str(i)] = [[w.text, round(w.y, 4), round(w.x, 4), w.line] for w in await _read(engine, pix)]
+                done[str(i)] = [[w.text, round(w.y, 4), round(w.x, 4), w.line,
+                                 round(w.x0, 4), round(w.y0, 4), round(w.x1, 4), round(w.y1, 4)]
+                                for w in await _read(engine, pix)]
                 if progress:
                     progress((n + 1) / len(todo))
                 if cache and (n % 20 == 19 or n == len(todo) - 1):
