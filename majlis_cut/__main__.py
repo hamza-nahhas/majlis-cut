@@ -20,7 +20,7 @@ from .book import build_book, guess_page_offset, load_turath_pages, read_pdf_tex
 
 VIEW_VERSION = 2     # raise when the way page pictures are drawn changes (2: transparent without a background)
 from .export import Timeline, camera_placeholder, render_preview
-from .highlight import CLIP_SCALE, DEFAULT_COLOR, make_clips, parse_color
+from .highlight import DEFAULT_COLOR, STYLES, clip_scale, make_clips, parse_color
 from .sync import camera_track, place_all, probe_video, save
 from .voice import VoiceModel, load_audio
 
@@ -178,25 +178,25 @@ def highlight_views(plan: dict, args, book, words: list[dict], pos, books: Path,
         notes.append(f"تحديد الكلمة يحتاج قارئ الصفحات في ويندوز، فحُدِّد السطر وحده. ({reason})")
     elif pages:
         ocr = ocr_pages(args.pdf, pages, ocr_cache(args.pdf, books), lambda f: progress(0.3 * f), boxes=True)
-    # Named after the colour too, so changing the colour keeps nothing stale.
-    out_dir = res / "highlight" / f"{views_dir.name}_{'%02x%02x%02x' % color}"
+    for v in plan["views"]:
+        v["ink"] = str(render_view(book, v["page"], v["stop"], views_dir, scale=args.overlay_size,
+                                   pos=args.overlay_pos, ink_only=True))
+    # Named after the colour and style too, so changing them keeps nothing stale.
+    out_dir = res / "highlight" / f"{views_dir.name}_{args.highlight_style}_{'%02x%02x%02x' % color}"
     if (res / "highlight").exists():
         for old in (res / "highlight").iterdir():
             if old != out_dir:
                 shutil.rmtree(old) if old.is_dir() else old.unlink()
     found = make_clips(plan["views"], words, pos, book, ocr, color, fps, out_dir,
-                       scale=args.overlay_size, place=args.overlay_pos,
+                       scale=args.overlay_size, place=args.overlay_pos, style=args.highlight_style,
                        progress=lambda f: progress(0.3 + 0.65 * f))
-    for v in plan["views"]:
-        if v.get("highlight"):
-            v["ink"] = str(render_view(book, v["page"], v["stop"], views_dir, scale=args.overlay_size,
-                                       pos=args.overlay_pos, ink_only=True))
     line_only = [p for p in found["line_only"] if ocr]
     if line_only:
         shown = "، ".join(str(p) for p in line_only[:12]) + ("…" if len(line_only) > 12 else "")
         notes.append(f"في الصفحات {shown} لم تُطابَق كلمات الكتاب بصورة الصفحة، فحُدِّد السطر وحده. "
                      "قد تكون طبعة الملف غير طبعة النص، أو الصفحة غير واضحة.")
-    plan["highlight"] = {"color": "#%02x%02x%02x" % color, "mb": round(found["bytes"] / 1e6, 1),
+    plan["highlight"] = {"style": args.highlight_style, "color": "#%02x%02x%02x" % color,
+                         "mb": round(found["bytes"] / 1e6, 1),
                          "line_only": found["line_only"] if ocr else "all"}
     return notes
 
@@ -205,7 +205,7 @@ def preview_highlights(views: list[dict], words, pos, book, args, color, books: 
                        height: int = 720) -> list[dict]:
     """The views' highlights drawn at the preview's size."""
     from .book import ocr_cache, view_frame
-    from .highlight import Highlight, page_boxes, view_events
+    from .highlight import highlight_for, page_boxes, view_events
     from .ocr import available, ocr_pages
 
     pages = sorted({v["page"] for v in views if v.get("highlight")})
@@ -218,7 +218,8 @@ def preview_highlights(views: list[dict], words, pos, book, args, color, books: 
         frame = view_frame(book, v["page"], v["stop"], scale=args.overlay_size, pos=args.overlay_pos)
         events = view_events(v, words, pos, book, boxes[v["page"]], frame)
         out.append({"t0": v["t0"], "t1": v["t1"], "ink": v["ink"],
-                    "hl": Highlight(events, v["t1"] - v["t0"], color, scale=height / 1080)})
+                    "hl": highlight_for(args.highlight_style, events, v["t1"] - v["t0"], color,
+                                        scale=height / 1080)})
     return out
 
 
@@ -266,6 +267,9 @@ def run() -> None:
                     help="highlight the word being read and its line (a clip on V3, the ink on V4)")
     ap.add_argument("--highlight-color", default=DEFAULT_COLOR,
                     help="colour of the highlight, e.g. #4096ff")
+    ap.add_argument("--highlight-style", choices=STYLES, default="ribbon",
+                    help="ribbon (colour under the words), glass (a pane of liquid glass) "
+                         "or glass-tail (glass fading out behind the word)")
     ap.add_argument("--cam-main", type=Path, nargs="*", default=[],
                     help="main camera clips of this lesson (files or a folder)")
     ap.add_argument("--cam-backup", type=Path, nargs="*", default=[],
@@ -428,13 +432,17 @@ def run() -> None:
                      has_audio=c.get("has_audio", False))
     for v in shown:
         tl.add_video(2, Path(v["file"]), v["t0"], v["t1"], still=True)
-    # The highlight between the page and its ink: letters stay on top of it.
-    hl_size = (round(1920 * CLIP_SCALE), round(1080 * CLIP_SCALE))
+    # The ribbon goes between the page and its ink, so letters stay on top of it. The
+    # glass carries the bent letters itself and goes over the page, with no ink track.
+    style = args.highlight_style
+    cs = clip_scale(style)
+    hl_size = None if cs == 1.0 else (round(1920 * cs), round(1080 * cs))
     for v in plan["views"]:
         if v.get("highlight"):
             tl.add_video(3, Path(v["highlight"]), v["t0"], v["t1"], src_duration=v["highlight_s"],
                          size=hl_size, alpha=True)
-            tl.add_video(4, Path(v["ink"]), v["t0"], v["t1"], still=True)
+            if style == "ribbon":
+                tl.add_video(4, Path(v["ink"]), v["t0"], v["t1"], still=True)
     tl.write_fcp7_xml(res / "timeline.xml")
     plan["warnings"] = checks(plan, args, text, asr.get("repaired_gaps", 0))
     plan["warnings"] += [{"text": note, "t": None} for note in hl_notes]
@@ -452,8 +460,9 @@ def run() -> None:
     lines = [f"reading {sum(s['t1'] - s['t0'] for s in read) / 60:.1f} min of {duration / 60:.1f} min, "
              f"{len(read)} passages, {len(plan['views'])} page views", ""]
     if plan.get("highlight"):
-        lines[1:1] = [f"highlight {plan['highlight']['color']}: {plan['highlight']['mb']} MB of clips on V3, "
-                      "the ink on V4"]
+        hl = plan["highlight"]
+        lines[1:1] = [f"highlight ({hl['style']}, {hl['color']}): {hl['mb']} MB of clips on V3"
+                      + (", the ink on V4" if hl["style"] == "ribbon" else "")]
     if args.fill_with_book:
         lines[1:1] = [f"the page also fills {plan['filled'] / 60:.1f} min where nothing else is on screen"]
     for s in plan["segments"]:

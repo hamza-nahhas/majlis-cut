@@ -514,6 +514,30 @@ class Highlight:
         return a, (min(z[0] for z in touched), min(z[1] for z in touched),
                    max(z[2] for z in touched), max(z[3] for z in touched))
 
+    def bind(self, page: np.ndarray | None = None, ink: np.ndarray | None = None) -> "Highlight":
+        """What the highlight is drawn with in apply(): the ink alone (H x W x 4, 0..1),
+        laid over the colour. (The page is not needed: the ribbon only adds colour.)"""
+        self.ink = None if ink is None else np.asarray(ink, np.float32)
+        return self
+
+    def apply(self, picture: np.ndarray, t: float) -> np.ndarray | None:
+        """The picture (H x W x 3 uint8, the page as shown) with the highlight at time t,
+        the ink laid again on top; None when there is nothing to draw."""
+        a, area = self.alpha_area(t)
+        if area is None:
+            return None
+        x0, y0, x1, y1 = area
+        out = picture.copy()
+        region = out[y0:y1, x0:x1].astype(np.float32)
+        cover = a[y0:y1, x0:x1, None]
+        region = region * (1 - cover) + self.color * cover
+        ink = getattr(self, "ink", None)
+        if ink is not None:
+            top = ink[y0:y1, x0:x1]
+            region = region * (1 - top[..., 3:]) + top[..., :3] * 255 * top[..., 3:]
+        out[y0:y1, x0:x1] = np.clip(region + 0.5, 0, 255).astype(np.uint8)
+        return out
+
     def frame(self, t: float) -> np.ndarray:
         """The highlight at time t as RGBA (straight alpha)."""
         a = self.alpha(t)
@@ -587,25 +611,71 @@ def write_clip(hl: Highlight, fps: float, out: Path, n: int | None = None) -> Pa
     return out
 
 
+STYLES = ("ribbon", "glass", "glass-tail")
+
+
+def highlight_for(style: str, events: list[Event], duration: float, color: tuple[int, int, int],
+                  size: tuple[int, int] = (1920, 1080), scale: float = 1.0) -> Highlight:
+    """The highlight of one view in the chosen style."""
+    if style == "ribbon":
+        return Highlight(events, duration, color, size, scale)
+    from .glass import Glass
+    return Glass(events, duration, color, style, size, scale)
+
+
+def clip_scale(style: str) -> float:
+    """The ribbon is soft and fits in half the frame; the glass bends letters, which need every pixel."""
+    return CLIP_SCALE if style == "ribbon" else 1.0
+
+
+def _picture(path: str, scale: float, mode: str) -> np.ndarray:
+    from PIL import Image
+
+    img = Image.open(path).convert(mode)
+    if scale != 1.0:
+        img = img.resize((round(img.width * scale), round(img.height * scale)), Image.BILINEAR)
+    return np.asarray(img, np.float32)
+
+
+def _draw_clip(job: dict) -> str:
+    """Draw one view's clip (run in a worker process)."""
+    hl = highlight_for(job["style"], job["events"], job["duration"], job["color"], job["size"], job["scale"])
+    if job["style"] != "ribbon":
+        hl.bind(_picture(job["file"], job["scale"], "RGBA"), _picture(job["ink"], job["scale"], "RGBA") / 255)
+    write_clip(hl, job["fps"], Path(job["out"]), job["frames"])
+    return job["out"]
+
+
+def workers() -> int:
+    """Clips drawn at once: the machine's cores, leaving room for ffmpeg and the system."""
+    import os
+    return max(1, min(6, (os.cpu_count() or 2) // 3))
+
+
 def make_clips(views: list[dict], words: list[dict], pos: np.ndarray, book, ocr: dict[int, list],
                color: tuple[int, int, int], fps: float, out_dir: Path,
                size: tuple[int, int] = (1920, 1080), scale: float = 1.0, place: str = "center",
-               progress=None) -> dict:
+               style: str = "ribbon", progress=None) -> dict:
     """Draw the highlight clip of every page view; set view["highlight"] to its file.
 
     ocr: words read off each page (with boxes); a page missing from it gets the line only.
+    The glass styles need view["file"] (the page as shown) and view["ink"] (the ink alone).
     A clip is named after everything that shapes it, so an unchanged view reuses its
     clip from the last run, and changing only the colour redraws without reading again.
+    Several views are drawn at once, in separate processes.
     Returns what a person should know: pages where only the line could be shown."""
     import hashlib
     import json
+    from concurrent.futures import ProcessPoolExecutor, as_completed
 
     from .book import view_frame
 
     out_dir.mkdir(parents=True, exist_ok=True)
     boxes = {p: page_boxes(book, p, ocr.get(p, [])) for p in sorted({v["page"] for v in views})}
+    cs = clip_scale(style)
     used: set[Path] = set()
-    for n, v in enumerate(views):
+    jobs = []
+    for v in views:
         frame = view_frame(book, v["page"], v["stop"], size, scale, place)
         events = view_events(v, words, pos, book, boxes[v["page"]], frame)
         v["highlight"] = None
@@ -613,17 +683,32 @@ def make_clips(views: list[dict], words: list[dict], pos: np.ndarray, book, ocr:
             continue
         duration = v["t1"] - v["t0"]
         frames = clip_frames(v["t0"], v["t1"], fps)
-        sig = json.dumps([HIGHLIGHT_VERSION, CLIP_SCALE, color, fps_text(fps), frames,
+        sig = json.dumps([HIGHLIGHT_VERSION, style, cs, color, fps_text(fps), frames,
+                          v.get("file") if style != "ribbon" else None,
                           [[round(e.t, 3), round(e.rest, 3), e.box and [round(x, 1) for x in e.box],
                             [round(x, 1) for x in e.band]] for e in events]])
         out = out_dir / f"hl_{book.printed[v['page']]:04d}_{hashlib.sha1(sig.encode()).hexdigest()[:10]}.mov"
-        if not out.exists():
-            write_clip(Highlight(events, duration, color, size, CLIP_SCALE), fps, out, frames)
         v["highlight"] = str(out)
         v["highlight_s"] = float(frames / Fraction(fps_text(fps)))
         used.add(out)
-        if progress:
-            progress((n + 1) / len(views))
+        if not out.exists():
+            jobs.append({"style": style, "events": events, "duration": duration, "color": color, "size": size,
+                         "scale": cs, "file": v.get("file"), "ink": v.get("ink"), "fps": fps,
+                         "out": str(out), "frames": frames})
+    done = 0
+    if len(jobs) > 1 and workers() > 1:
+        with ProcessPoolExecutor(workers()) as pool:
+            for f in as_completed([pool.submit(_draw_clip, j) for j in jobs]):
+                f.result()
+                done += 1
+                if progress:
+                    progress(done / len(jobs))
+    else:
+        for j in jobs:
+            _draw_clip(j)
+            done += 1
+            if progress:
+                progress(done / len(jobs))
     for old in out_dir.glob("hl_*"):
         if old not in used:
             old.unlink(missing_ok=True)
@@ -632,9 +717,11 @@ def make_clips(views: list[dict], words: list[dict], pos: np.ndarray, book, ocr:
 
 
 def sample(book, page_idx: int, stop: int, frame, ocr_words, color: tuple[int, int, int],
-           size: tuple[int, int] = (1920, 1080)) -> np.ndarray | None:
-    """The highlight resting on one word of a view, for judging the colour (RGBA frame).
+           page: np.ndarray, ink: np.ndarray, style: str = "ribbon") -> np.ndarray | None:
+    """The view with the highlight resting on one of its words, for judging the look.
 
+    page: the view as shown (H x W x 3 or 4, 0..255); ink: the ink alone (H x W x 4, 0..1).
+    Returns the picture (H x W x 3 uint8), or None when no word of the view is placed.
     Picks a word a little before the middle of what the view shows. Without the words'
     places (no reader) only a line is lit, as it would be in the result."""
     boxes = page_boxes(book, page_idx, ocr_words or [])
@@ -655,4 +742,12 @@ def sample(book, page_idx: int, stop: int, frame, ocr_words, color: tuple[int, i
     e = Event(0.0, 99.0, e.box, e.band)
     # a moment when the ribbon has come to rest on the word, before it dims
     settled = 0.62 * _said_in(e.box[2] - e.box[0]) + Highlight.TRAIL + 0.3 if e.box else 1.0
-    return Highlight([e], 3.0, color, size).frame(settled)
+    h, w = page.shape[:2]
+    hl = highlight_for(style, [e], 3.0, color, (w, h)).bind(page, ink)
+    shown = np.asarray(page, np.float32)
+    if shown.shape[2] == 4:                          # see-through page: judge it on white
+        a = shown[..., 3:] / 255
+        shown = shown[..., :3] * a + 255 * (1 - a)
+    shown = np.clip(shown + 0.5, 0, 255).astype(np.uint8)
+    out = hl.apply(shown, settled)
+    return shown if out is None else out
